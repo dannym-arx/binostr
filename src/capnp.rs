@@ -40,6 +40,7 @@ fn pack_fixed_data(event: &NostrEvent) -> [u8; FIXED_DATA_SIZE] {
 
 /// Unpack fixed fields from a 138-byte blob
 #[inline]
+#[allow(clippy::type_complexity)]
 fn unpack_fixed_data(data: &[u8]) -> Result<([u8; 32], [u8; 32], [u8; 64], i64, u16), CapnpError> {
     if data.len() < FIXED_DATA_SIZE {
         return Err(CapnpError::InvalidLength("fixed data too short"));
@@ -62,7 +63,7 @@ fn is_hex_string(s: &str) -> bool {
 /// Encode a tag value optimally: if it's hex, decode to bytes (50% size reduction),
 /// otherwise store as UTF-8 bytes
 fn encode_tag_value(value: &str) -> (bool, Vec<u8>) {
-    if is_hex_string(value) && value.len() % 2 == 0 {
+    if is_hex_string(value) && value.len().is_multiple_of(2) {
         // Try to decode as hex - if successful, store as hex bytes
         if let Ok(bytes) = hex::decode(value) {
             return (true, bytes);

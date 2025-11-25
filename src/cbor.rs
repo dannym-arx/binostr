@@ -379,7 +379,7 @@ fn is_hex_string(s: &str) -> bool {
 /// Encode a tag value optimally: if it's hex, decode to bytes (50% size reduction),
 /// otherwise store as text
 fn encode_tag_value_cbor(value: &str) -> Value {
-    if is_hex_string(value) && value.len() % 2 == 0 {
+    if is_hex_string(value) && value.len().is_multiple_of(2) {
         // Try to decode as hex - if successful, store as bytes
         if let Ok(bytes) = hex::decode(value) {
             return Value::Bytes(bytes);
@@ -436,16 +436,6 @@ fn extract_u16(value: &Value, field: &'static str) -> Result<u16, CborError> {
         .ok_or(CborError::ExpectedInteger(field))
 }
 
-fn extract_u32(value: &Value, field: &'static str) -> Result<u32, CborError> {
-    value
-        .as_integer()
-        .and_then(|i| {
-            let i: i128 = i.into();
-            u32::try_from(i).ok()
-        })
-        .ok_or(CborError::ExpectedInteger(field))
-}
-
 fn extract_string(value: &Value, field: &'static str) -> Result<String, CborError> {
     value
         .as_text()
@@ -459,7 +449,7 @@ fn extract_tags(value: &Value) -> Result<Vec<Vec<String>>, CborError> {
     arr.iter()
         .map(|tag_value| {
             let tag_arr = tag_value.as_array().ok_or(CborError::ExpectedArray)?;
-            tag_arr.iter().map(|v| decode_tag_value_cbor(v)).collect()
+            tag_arr.iter().map(decode_tag_value_cbor).collect()
         })
         .collect()
 }
