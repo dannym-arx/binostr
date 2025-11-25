@@ -4,7 +4,7 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 
 mod common;
 
-use binostr::{capnp, cbor, json, proto};
+use binostr::{capnp, cbor, dannypack, json, proto};
 
 fn bench_deserialize_single(c: &mut Criterion) {
     let events = common::load_sample(1000);
@@ -24,6 +24,8 @@ fn bench_deserialize_single(c: &mut Criterion) {
     let proto_string_data = proto::string::serialize(event);
     let proto_binary_data = proto::binary::serialize(event);
     let capnp_data = capnp::serialize_event(event);
+    let capnp_packed_data = capnp::serialize_event_packed(event);
+    let dannypack_data = dannypack::serialize(event);
 
     let mut group = c.benchmark_group("deserialize_single");
     group.throughput(Throughput::Elements(1));
@@ -56,6 +58,14 @@ fn bench_deserialize_single(c: &mut Criterion) {
         b.iter(|| capnp::deserialize_event(black_box(&capnp_data)))
     });
 
+    group.bench_function("capnp_packed", |b| {
+        b.iter(|| capnp::deserialize_event_packed(black_box(&capnp_packed_data)))
+    });
+
+    group.bench_function("dannypack", |b| {
+        b.iter(|| dannypack::deserialize(black_box(&dannypack_data)))
+    });
+
     group.finish();
 }
 
@@ -83,6 +93,8 @@ fn bench_deserialize_batch(c: &mut Criterion) {
         let proto_string_data = proto::string::serialize_batch(&batch);
         let proto_binary_data = proto::binary::serialize_batch(&batch);
         let capnp_data = capnp::serialize_batch(&batch);
+        let capnp_packed_data = capnp::serialize_batch_packed(&batch);
+        let dannypack_data = dannypack::serialize_batch(&batch);
 
         group.throughput(Throughput::Elements(batch_size as u64));
 
@@ -127,6 +139,18 @@ fn bench_deserialize_batch(c: &mut Criterion) {
             &capnp_data,
             |b, data| b.iter(|| capnp::deserialize_batch(black_box(data))),
         );
+
+        group.bench_with_input(
+            BenchmarkId::new("capnp_packed", batch_size),
+            &capnp_packed_data,
+            |b, data| b.iter(|| capnp::deserialize_batch_packed(black_box(data))),
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("dannypack", batch_size),
+            &dannypack_data,
+            |b, data| b.iter(|| dannypack::deserialize_batch(black_box(data))),
+        );
     }
 
     group.finish();
@@ -148,6 +172,8 @@ fn bench_deserialize_throughput(c: &mut Criterion) {
     let proto_string_data: Vec<_> = events.iter().map(proto::string::serialize).collect();
     let proto_binary_data: Vec<_> = events.iter().map(proto::binary::serialize).collect();
     let capnp_data: Vec<_> = events.iter().map(capnp::serialize_event).collect();
+    let capnp_packed_data: Vec<_> = events.iter().map(capnp::serialize_event_packed).collect();
+    let dannypack_data: Vec<_> = events.iter().map(dannypack::serialize).collect();
 
     let total_json_bytes: usize = json_data.iter().map(|d| d.len()).sum();
 
@@ -206,6 +232,22 @@ fn bench_deserialize_throughput(c: &mut Criterion) {
         b.iter(|| {
             for data in &capnp_data {
                 black_box(capnp::deserialize_event(data).unwrap());
+            }
+        })
+    });
+
+    group.bench_function("capnp_packed", |b| {
+        b.iter(|| {
+            for data in &capnp_packed_data {
+                black_box(capnp::deserialize_event_packed(data).unwrap());
+            }
+        })
+    });
+
+    group.bench_function("dannypack", |b| {
+        b.iter(|| {
+            for data in &dannypack_data {
+                black_box(dannypack::deserialize(data).unwrap());
             }
         })
     });

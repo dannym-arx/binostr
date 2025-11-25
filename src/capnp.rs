@@ -44,13 +44,13 @@ fn unpack_fixed_data(data: &[u8]) -> Result<([u8; 32], [u8; 32], [u8; 64], i64, 
     if data.len() < FIXED_DATA_SIZE {
         return Err(CapnpError::InvalidLength("fixed data too short"));
     }
-    
+
     let id: [u8; 32] = data[0..32].try_into().unwrap();
     let pubkey: [u8; 32] = data[32..64].try_into().unwrap();
     let sig: [u8; 64] = data[64..128].try_into().unwrap();
     let created_at = i64::from_le_bytes(data[128..136].try_into().unwrap());
     let kind = u16::from_le_bytes(data[136..138].try_into().unwrap());
-    
+
     Ok((id, pubkey, sig, created_at, kind))
 }
 
@@ -88,14 +88,14 @@ fn decode_tag_value(is_hex: bool, bytes: &[u8]) -> Result<String, CapnpError> {
 ///         [flags_and_len:u16 where bit15=is_hex, bits0-14=length][data]
 fn pack_tags(tags: &[Vec<String>]) -> Vec<u8> {
     let mut buf = Vec::with_capacity(256);
-    
+
     // Tag count (u16)
     buf.extend_from_slice(&(tags.len() as u16).to_le_bytes());
-    
+
     for tag in tags {
         // Value count for this tag (u8)
         buf.push(tag.len() as u8);
-        
+
         for value in tag {
             let (is_hex, data) = encode_tag_value(value);
             // flags_and_len: bit15 = is_hex, bits0-14 = length
@@ -108,7 +108,7 @@ fn pack_tags(tags: &[Vec<String>]) -> Vec<u8> {
             buf.extend_from_slice(&data);
         }
     }
-    
+
     buf
 }
 
@@ -117,51 +117,51 @@ fn unpack_tags(data: &[u8]) -> Result<Vec<Vec<String>>, CapnpError> {
     if data.len() < 2 {
         return Ok(Vec::new());
     }
-    
+
     let mut pos = 0;
-    
+
     // Read tag count
     let tag_count = u16::from_le_bytes([data[pos], data[pos + 1]]) as usize;
     pos += 2;
-    
+
     let mut tags = Vec::with_capacity(tag_count);
-    
+
     for _ in 0..tag_count {
         if pos >= data.len() {
             return Err(CapnpError::InvalidTagData("truncated tag data"));
         }
-        
+
         // Read value count for this tag
         let value_count = data[pos] as usize;
         pos += 1;
-        
+
         let mut values = Vec::with_capacity(value_count);
-        
+
         for _ in 0..value_count {
             if pos + 2 > data.len() {
                 return Err(CapnpError::InvalidTagData("truncated value header"));
             }
-            
+
             // Read flags_and_len
             let flags_and_len = u16::from_le_bytes([data[pos], data[pos + 1]]);
             pos += 2;
-            
+
             let is_hex = (flags_and_len & 0x8000) != 0;
             let len = (flags_and_len & 0x7FFF) as usize;
-            
+
             if pos + len > data.len() {
                 return Err(CapnpError::InvalidTagData("truncated value data"));
             }
-            
+
             let value_bytes = &data[pos..pos + len];
             pos += len;
-            
+
             values.push(decode_tag_value(is_hex, value_bytes)?);
         }
-        
+
         tags.push(values);
     }
-    
+
     Ok(tags)
 }
 
@@ -233,7 +233,8 @@ pub fn serialize_event_packed(event: &NostrEvent) -> Vec<u8> {
     }
 
     let mut buf = Vec::new();
-    serialize_packed::write_message(&mut buf, &message).expect("Cap'n Proto packed serialization failed");
+    serialize_packed::write_message(&mut buf, &message)
+        .expect("Cap'n Proto packed serialization failed");
     buf
 }
 
@@ -354,7 +355,8 @@ pub fn serialize_batch_packed(events: &[NostrEvent]) -> Vec<u8> {
     }
 
     let mut buf = Vec::new();
-    serialize_packed::write_message(&mut buf, &message).expect("Cap'n Proto packed serialization failed");
+    serialize_packed::write_message(&mut buf, &message)
+        .expect("Cap'n Proto packed serialization failed");
     buf
 }
 
@@ -476,8 +478,10 @@ mod tests {
         println!("Cap'n Proto:        {} bytes", capnp_size);
         println!("Cap'n Proto Packed: {} bytes", capnp_packed_size);
         println!("JSON:               {} bytes", json_size);
-        println!("Packed savings:     {:.1}%", 
-            100.0 * (1.0 - capnp_packed_size as f64 / capnp_size as f64));
+        println!(
+            "Packed savings:     {:.1}%",
+            100.0 * (1.0 - capnp_packed_size as f64 / capnp_size as f64)
+        );
 
         // Packed should be smaller than unpacked
         assert!(capnp_packed_size <= capnp_size);
