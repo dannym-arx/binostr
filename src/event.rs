@@ -21,7 +21,7 @@ pub struct NostrEvent {
     pub created_at: i64,
 
     /// Event kind (0-65535)
-    pub kind: u32,
+    pub kind: u16,
 
     /// Array of tags, each tag is an array of strings
     pub tags: Vec<Vec<String>>,
@@ -39,7 +39,7 @@ impl NostrEvent {
         id: &str,
         pubkey: &str,
         created_at: i64,
-        kind: u32,
+        kind: u16,
         tags: Vec<Vec<String>>,
         content: String,
         sig: &str,
@@ -195,7 +195,7 @@ pub struct NostrEventJson {
     pub id: String,
     pub pubkey: String,
     pub created_at: i64,
-    pub kind: u32,
+    pub kind: u16,
     pub tags: Vec<Vec<String>>,
     pub content: String,
     pub sig: String,

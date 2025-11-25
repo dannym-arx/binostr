@@ -9,7 +9,7 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 
 use crate::event::{NostrEvent, SizeCategory, TagCategory};
-use crate::{capnp, cbor, json, proto};
+use crate::{capnp, cbor, dannypack, json, proto};
 
 /// Serialization format identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -21,6 +21,8 @@ pub enum Format {
     ProtoString,
     ProtoBinary,
     CapnProto,
+    CapnProtoPacked,
+    DannyPack,
 }
 
 impl Format {
@@ -33,6 +35,8 @@ impl Format {
             Format::ProtoString,
             Format::ProtoBinary,
             Format::CapnProto,
+            Format::CapnProtoPacked,
+            Format::DannyPack,
         ]
     }
 
@@ -45,6 +49,8 @@ impl Format {
             Format::ProtoString => "Proto String",
             Format::ProtoBinary => "Proto Binary",
             Format::CapnProto => "Cap'n Proto",
+            Format::CapnProtoPacked => "Cap'n Packed",
+            Format::DannyPack => "DannyPack",
         }
     }
 
@@ -57,6 +63,8 @@ impl Format {
             Format::ProtoString => "proto_str",
             Format::ProtoBinary => "proto_bin",
             Format::CapnProto => "capnp",
+            Format::CapnProtoPacked => "capnp_pk",
+            Format::DannyPack => "dannypack",
         }
     }
 }
@@ -71,6 +79,8 @@ pub fn serialize(event: &NostrEvent, format: Format) -> Vec<u8> {
         Format::ProtoString => proto::string::serialize(event),
         Format::ProtoBinary => proto::binary::serialize(event),
         Format::CapnProto => capnp::serialize_event(event),
+        Format::CapnProtoPacked => capnp::serialize_event_packed(event),
+        Format::DannyPack => dannypack::serialize(event),
     }
 }
 
@@ -84,6 +94,8 @@ pub fn serialize_batch(events: &[NostrEvent], format: Format) -> Vec<u8> {
         Format::ProtoString => proto::string::serialize_batch(events),
         Format::ProtoBinary => proto::binary::serialize_batch(events),
         Format::CapnProto => capnp::serialize_batch(events),
+        Format::CapnProtoPacked => capnp::serialize_batch_packed(events),
+        Format::DannyPack => dannypack::serialize_batch(events),
     }
 }
 
@@ -208,7 +220,7 @@ pub fn compute_aggregate_stats(events: &[NostrEvent]) -> Vec<AggregateSizeStats>
 #[derive(Debug, Clone)]
 pub struct DistributionAnalysis {
     pub total_events: usize,
-    pub by_kind: HashMap<u32, usize>,
+    pub by_kind: HashMap<u16, usize>,
     pub by_size: HashMap<SizeCategory, usize>,
     pub by_tags: HashMap<TagCategory, usize>,
     pub avg_content_len: f64,
@@ -219,7 +231,7 @@ impl DistributionAnalysis {
     pub fn from_events(events: &[NostrEvent]) -> Self {
         let total_events = events.len();
 
-        let mut by_kind: HashMap<u32, usize> = HashMap::new();
+        let mut by_kind: HashMap<u16, usize> = HashMap::new();
         let mut by_size: HashMap<SizeCategory, usize> = HashMap::new();
         let mut by_tags: HashMap<TagCategory, usize> = HashMap::new();
         let mut total_content_len = 0usize;
@@ -255,7 +267,7 @@ impl DistributionAnalysis {
         }
     }
 
-    pub fn top_kinds(&self, n: usize) -> Vec<(u32, usize)> {
+    pub fn top_kinds(&self, n: usize) -> Vec<(u16, usize)> {
         let mut kinds: Vec<_> = self.by_kind.iter().map(|(&k, &v)| (k, v)).collect();
         kinds.sort_by(|a, b| b.1.cmp(&a.1));
         kinds.truncate(n);
@@ -375,7 +387,7 @@ mod tests {
         let event = sample_event();
         let stats = compute_size_stats(&event);
 
-        assert_eq!(stats.len(), 7);
+        assert_eq!(stats.len(), 9);
 
         // All formats should produce non-zero sizes
         for stat in &stats {

@@ -1,10 +1,11 @@
 //! Binostr: Binary Nostr Serialization Benchmarks
 //!
 //! This library provides tools for benchmarking different serialization
-//! formats for Nostr events: JSON, CBOR, Protocol Buffers, and Cap'n Proto.
+//! formats for Nostr events: JSON, CBOR, Protocol Buffers, Cap'n Proto, and DannyPack.
 
 pub mod capnp;
 pub mod cbor;
+pub mod dannypack;
 pub mod event;
 pub mod json;
 pub mod loader;

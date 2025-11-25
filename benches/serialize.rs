@@ -4,7 +4,7 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 
 mod common;
 
-use binostr::{capnp, cbor, json, proto};
+use binostr::{capnp, cbor, dannypack, json, proto};
 
 fn bench_serialize_single(c: &mut Criterion) {
     let events = common::load_sample(1000);
@@ -44,6 +44,14 @@ fn bench_serialize_single(c: &mut Criterion) {
 
     group.bench_function("capnp", |b| {
         b.iter(|| capnp::serialize_event(black_box(event)))
+    });
+
+    group.bench_function("capnp_packed", |b| {
+        b.iter(|| capnp::serialize_event_packed(black_box(event)))
+    });
+
+    group.bench_function("dannypack", |b| {
+        b.iter(|| dannypack::serialize(black_box(event)))
     });
 
     group.finish();
@@ -104,6 +112,18 @@ fn bench_serialize_batch(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("capnp", batch_size), &batch, |b, batch| {
             b.iter(|| capnp::serialize_batch(black_box(batch)))
         });
+
+        group.bench_with_input(
+            BenchmarkId::new("capnp_packed", batch_size),
+            &batch,
+            |b, batch| b.iter(|| capnp::serialize_batch_packed(black_box(batch))),
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("dannypack", batch_size),
+            &batch,
+            |b, batch| b.iter(|| dannypack::serialize_batch(black_box(batch))),
+        );
     }
 
     group.finish();
@@ -175,6 +195,22 @@ fn bench_serialize_throughput(c: &mut Criterion) {
         b.iter(|| {
             for event in &events {
                 black_box(capnp::serialize_event(event));
+            }
+        })
+    });
+
+    group.bench_function("capnp_packed", |b| {
+        b.iter(|| {
+            for event in &events {
+                black_box(capnp::serialize_event_packed(event));
+            }
+        })
+    });
+
+    group.bench_function("dannypack", |b| {
+        b.iter(|| {
+            for event in &events {
+                black_box(dannypack::serialize(event));
             }
         })
     });

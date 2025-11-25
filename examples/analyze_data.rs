@@ -66,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn kind_name(kind: u32) -> &'static str {
+fn kind_name(kind: u16) -> &'static str {
     match kind {
         0 => "Profile Metadata",
         1 => "Short Text Note",
