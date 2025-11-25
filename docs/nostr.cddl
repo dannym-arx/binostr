@@ -1,0 +1,52 @@
+; CDDL Schema for Nostr Events
+; Used for CBOR serialization validation
+
+; ============================================
+; Option A: Schemaless (JSON-like with field names)
+; ============================================
+nostr-event-schemaless = {
+  "id": bstr .size 32,
+  "pubkey": bstr .size 32,
+  "created_at": uint,
+  "kind": uint,
+  "tags": [* tag],
+  "content": tstr,
+  "sig": bstr .size 64
+}
+
+; ============================================
+; Option B: Packed Array (positional, smallest)
+; ============================================
+; Position: [id, pubkey, created_at, kind, tags, content, sig]
+nostr-event-packed = [
+  bstr .size 32,    ; 0: id
+  bstr .size 32,    ; 1: pubkey
+  uint,             ; 2: created_at
+  uint,             ; 3: kind
+  [* tag],          ; 4: tags
+  tstr,             ; 5: content
+  bstr .size 64     ; 6: sig
+]
+
+; ============================================
+; Option C: Integer-keyed Map (balance of size and extensibility)
+; ============================================
+nostr-event-intkey = {
+  0: bstr .size 32,   ; id
+  1: bstr .size 32,   ; pubkey
+  2: uint,            ; created_at
+  3: uint,            ; kind
+  4: [* tag],         ; tags
+  5: tstr,            ; content
+  6: bstr .size 64    ; sig
+}
+
+; ============================================
+; Common definitions
+; ============================================
+tag = [+ tstr]  ; A tag is one or more strings
+
+; Batch of events
+event-batch-packed = [* nostr-event-packed]
+event-batch-intkey = [* nostr-event-intkey]
+

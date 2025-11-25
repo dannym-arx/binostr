@@ -1,0 +1,54 @@
+[package]
+name = "binostr"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Benchmarking library for comparing binary serialization formats for Nostr events"
+repository = "https://github.com/your-username/binostr"
+
+[dependencies]
+# Core serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_bytes = "0.11"
+
+# CBOR
+ciborium = "0.2"
+
+# Protocol Buffers
+prost = "0.13"
+
+# Cap'n Proto
+capnp = "0.20"
+
+# Compression
+flate2 = "1.0"
+zstd = "0.13"
+
+# Utilities
+rand = "0.8"
+hex = "0.4"
+thiserror = "2.0"
+
+[build-dependencies]
+prost-build = "0.13"
+capnpc = "0.20"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "serialize"
+harness = false
+
+[[bench]]
+name = "deserialize"
+harness = false
+
+[[bench]]
+name = "by_kind"
+harness = false
+
+[[bench]]
+name = "size_analysis"
+harness = false

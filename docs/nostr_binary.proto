@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package nostr_binary;
+
+// Binary-optimized Nostr event message
+//
+// Same as ProtoEvent but stores cryptographic fields as raw bytes
+// instead of hex strings, saving 128 bytes per event:
+// - id: 32 bytes vs 64 hex chars
+// - pubkey: 32 bytes vs 64 hex chars
+// - sig: 64 bytes vs 128 hex chars
+message ProtoEventBinary {
+  // 32-byte SHA-256 hash of the serialized event data (raw bytes)
+  bytes id = 1;
+
+  // 32-byte public key of the event creator (raw bytes)
+  bytes pubkey = 2;
+
+  // Unix timestamp in seconds when the event was created
+  int64 created_at = 3;
+
+  // Event kind (integer between 0 and 65535)
+  int32 kind = 4;
+
+  // Array of tags (each tag is an array of strings)
+  repeated TagBinary tags = 5;
+
+  // Arbitrary string content (format depends on event kind)
+  string content = 6;
+
+  // 64-byte Schnorr signature of the event ID (raw bytes)
+  bytes sig = 7;
+}
+
+// Tag message representing a single tag
+message TagBinary {
+  // Array of string values representing the tag
+  repeated string values = 1;
+}
+
+// Batch of binary events
+message EventBatchBinary {
+  repeated ProtoEventBinary events = 1;
+}
+
