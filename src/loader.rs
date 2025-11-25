@@ -225,9 +225,8 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore] // Requires actual data files
     fn test_load_events() {
-        let loader = EventLoader::open("data/2025_09_20.pb.gz").unwrap();
+        let loader = EventLoader::open("data/sample.pb.gz").unwrap();
         let events = loader.load_limited(10).unwrap();
         assert_eq!(events.len(), 10);
 
