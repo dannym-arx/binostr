@@ -13,7 +13,7 @@ use crate::loader::LoadError;
 
 /// Event kinds to exclude from benchmarks (non-standard or unknown kinds)
 /// These are kinds that appeared in the dataset but aren't in the NIPs
-pub const EXCLUDED_KINDS: &[u32] = &[
+pub const EXCLUDED_KINDS: &[u16] = &[
     443,   // Unknown
     1000,  // Unknown
     1009,  // Unknown
@@ -66,7 +66,7 @@ impl EventSampler {
     }
 
     /// Filter out specific event kinds
-    pub fn filter_kinds(&mut self, kinds_to_remove: &[u32]) {
+    pub fn filter_kinds(&mut self, kinds_to_remove: &[u16]) {
         self.events.retain(|e| !kinds_to_remove.contains(&e.kind));
     }
 
@@ -93,12 +93,12 @@ impl EventSampler {
     }
 
     /// Get events of a specific kind
-    pub fn by_kind(&self, kind: u32) -> Vec<&NostrEvent> {
+    pub fn by_kind(&self, kind: u16) -> Vec<&NostrEvent> {
         self.events.iter().filter(|e| e.kind == kind).collect()
     }
 
     /// Get a sample of events of a specific kind
-    pub fn sample_kind(&mut self, kind: u32, n: usize) -> Vec<&NostrEvent> {
+    pub fn sample_kind(&mut self, kind: u16, n: usize) -> Vec<&NostrEvent> {
         let kind_events: Vec<_> = self.events.iter().filter(|e| e.kind == kind).collect();
         kind_events
             .choose_multiple(&mut self.rng, n.min(kind_events.len()))
@@ -149,7 +149,7 @@ impl EventSampler {
     }
 
     /// Get distribution of event kinds
-    pub fn kind_distribution(&self) -> HashMap<u32, usize> {
+    pub fn kind_distribution(&self) -> HashMap<u16, usize> {
         let mut dist = HashMap::new();
         for event in &self.events {
             *dist.entry(event.kind).or_insert(0) += 1;
@@ -374,7 +374,7 @@ mod tests {
                 id: [i as u8; 32],
                 pubkey: [0u8; 32],
                 created_at: 1234567890 + i as i64,
-                kind: (i % 10) as u32,
+                kind: (i % 10) as u16,
                 tags: (0..(i % 5)).map(|j| vec![format!("tag{}", j)]).collect(),
                 content: "x".repeat(i * 10),
                 sig: [0u8; 64],

@@ -9,10 +9,10 @@ use std::time::Duration;
 #[allow(dead_code)]
 pub fn fast_criterion() -> Criterion {
     Criterion::default()
-        .sample_size(30)              // Default: 100
-        .measurement_time(Duration::from_secs(2))  // Default: 5s
-        .warm_up_time(Duration::from_millis(500))  // Default: 3s
-        .confidence_level(0.90)       // Default: 0.95
+        .sample_size(30) // Default: 100
+        .measurement_time(Duration::from_secs(2)) // Default: 5s
+        .warm_up_time(Duration::from_millis(500)) // Default: 3s
+        .confidence_level(0.90) // Default: 0.95
 }
 
 /// Default data directory
@@ -43,7 +43,7 @@ pub fn load_sample(size: usize) -> Vec<NostrEvent> {
 
 /// Load events filtered by kind
 #[allow(dead_code)]
-pub fn load_by_kind(kind: u32, size: usize) -> Vec<NostrEvent> {
+pub fn load_by_kind(kind: u16, size: usize) -> Vec<NostrEvent> {
     let mut sampler = match EventSampler::from_directory(DATA_DIR, size * 10) {
         Ok(s) => s,
         Err(e) => {
@@ -86,7 +86,7 @@ pub fn generate_synthetic_events(count: usize) -> Vec<NostrEvent> {
 
 /// Generate synthetic events of a specific kind
 #[allow(dead_code)]
-pub fn generate_synthetic_events_kind(kind: u32, count: usize) -> Vec<NostrEvent> {
+pub fn generate_synthetic_events_kind(kind: u16, count: usize) -> Vec<NostrEvent> {
     (0..count)
         .map(|i| {
             let (tags, content) = match kind {

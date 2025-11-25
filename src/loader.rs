@@ -165,7 +165,7 @@ fn proto_to_event(proto: ProtoEvent) -> Result<NostrEvent, LoadError> {
         id,
         pubkey,
         created_at: proto.created_at,
-        kind: proto.kind as u32,
+        kind: proto.kind as u16,
         tags,
         content: proto.content,
         sig,

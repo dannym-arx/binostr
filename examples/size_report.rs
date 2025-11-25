@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
 
     let sample_size = parse_arg(&args, "--sample-size").unwrap_or(10_000);
-    let filter_kind: Option<u32> = parse_arg(&args, "--kind");
+    let filter_kind: Option<u16> = parse_arg(&args, "--kind");
 
     println!("╔══════════════════════════════════════════════════════════════════╗");
     println!("║               BINOSTR SIZE COMPARISON REPORT                     ║");

@@ -70,7 +70,7 @@ pub mod string {
                 .try_into()
                 .map_err(|_| ProtoError::InvalidLength("pubkey"))?,
             created_at: proto.created_at,
-            kind: proto.kind as u32,
+            kind: proto.kind as u16,
             tags: proto.tags.into_iter().map(|t| t.values).collect(),
             content: proto.content,
             sig: sig
@@ -144,7 +144,7 @@ pub mod binary {
                 .try_into()
                 .map_err(|_| ProtoError::InvalidLength("pubkey"))?,
             created_at: proto.created_at,
-            kind: proto.kind as u32,
+            kind: proto.kind as u16,
             tags: proto.tags.into_iter().map(|t| t.values).collect(),
             content: proto.content,
             sig: proto

@@ -208,7 +208,7 @@ pub fn compute_aggregate_stats(events: &[NostrEvent]) -> Vec<AggregateSizeStats>
 #[derive(Debug, Clone)]
 pub struct DistributionAnalysis {
     pub total_events: usize,
-    pub by_kind: HashMap<u32, usize>,
+    pub by_kind: HashMap<u16, usize>,
     pub by_size: HashMap<SizeCategory, usize>,
     pub by_tags: HashMap<TagCategory, usize>,
     pub avg_content_len: f64,
@@ -219,7 +219,7 @@ impl DistributionAnalysis {
     pub fn from_events(events: &[NostrEvent]) -> Self {
         let total_events = events.len();
 
-        let mut by_kind: HashMap<u32, usize> = HashMap::new();
+        let mut by_kind: HashMap<u16, usize> = HashMap::new();
         let mut by_size: HashMap<SizeCategory, usize> = HashMap::new();
         let mut by_tags: HashMap<TagCategory, usize> = HashMap::new();
         let mut total_content_len = 0usize;
@@ -255,7 +255,7 @@ impl DistributionAnalysis {
         }
     }
 
-    pub fn top_kinds(&self, n: usize) -> Vec<(u32, usize)> {
+    pub fn top_kinds(&self, n: usize) -> Vec<(u16, usize)> {
         let mut kinds: Vec<_> = self.by_kind.iter().map(|(&k, &v)| (k, v)).collect();
         kinds.sort_by(|a, b| b.1.cmp(&a.1));
         kinds.truncate(n);

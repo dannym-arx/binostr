@@ -7,7 +7,7 @@ mod common;
 use binostr::{capnp, cbor, json, proto, NostrEvent};
 
 /// Benchmark a specific event kind
-fn bench_kind(c: &mut Criterion, kind: u32, name: &str) {
+fn bench_kind(c: &mut Criterion, kind: u16, name: &str) {
     let events = common::load_by_kind(kind, 100);
 
     if events.is_empty() {
@@ -97,7 +97,7 @@ fn bench_kind(c: &mut Criterion, kind: u32, name: &str) {
     print_size_comparison(&events, kind, name);
 }
 
-fn print_size_comparison(events: &[NostrEvent], kind: u32, name: &str) {
+fn print_size_comparison(events: &[NostrEvent], kind: u16, name: &str) {
     if events.is_empty() {
         return;
     }

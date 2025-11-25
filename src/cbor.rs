@@ -23,7 +23,7 @@ pub struct CborSchemaless {
     #[serde(with = "serde_bytes")]
     pub pubkey: Vec<u8>,
     pub created_at: i64,
-    pub kind: u32,
+    pub kind: u16,
     pub tags: Vec<Vec<String>>,
     pub content: String,
     #[serde(with = "serde_bytes")]
@@ -134,7 +134,7 @@ pub mod packed {
         let id = extract_bytes(&arr[0], "id")?;
         let pubkey = extract_bytes(&arr[1], "pubkey")?;
         let created_at = extract_i64(&arr[2], "created_at")?;
-        let kind = extract_u32(&arr[3], "kind")?;
+        let kind = extract_u16(&arr[3], "kind")?;
         let tags = extract_tags(&arr[4])?;
         let content = extract_string(&arr[5], "content")?;
         let sig = extract_bytes(&arr[6], "sig")?;
@@ -195,7 +195,7 @@ pub mod packed {
                         .try_into()
                         .map_err(|_| CborError::InvalidLength("pubkey"))?,
                     created_at: extract_i64(&arr[2], "created_at")?,
-                    kind: extract_u32(&arr[3], "kind")?,
+                    kind: extract_u16(&arr[3], "kind")?,
                     tags: extract_tags(&arr[4])?,
                     content: extract_string(&arr[5], "content")?,
                     sig: extract_bytes(&arr[6], "sig")?
@@ -259,7 +259,7 @@ pub mod intkey {
                 0 => id = Some(extract_bytes(v, "id")?),
                 1 => pubkey = Some(extract_bytes(v, "pubkey")?),
                 2 => created_at = Some(extract_i64(v, "created_at")?),
-                3 => kind = Some(extract_u32(v, "kind")?),
+                3 => kind = Some(extract_u16(v, "kind")?),
                 4 => tags = Some(extract_tags(v)?),
                 5 => content = Some(extract_string(v, "content")?),
                 6 => sig = Some(extract_bytes(v, "sig")?),
@@ -336,7 +336,7 @@ pub mod intkey {
                         0 => id = Some(extract_bytes(val, "id")?),
                         1 => pubkey = Some(extract_bytes(val, "pubkey")?),
                         2 => created_at = Some(extract_i64(val, "created_at")?),
-                        3 => kind = Some(extract_u32(val, "kind")?),
+                        3 => kind = Some(extract_u16(val, "kind")?),
                         4 => tags = Some(extract_tags(val)?),
                         5 => content = Some(extract_string(val, "content")?),
                         6 => sig = Some(extract_bytes(val, "sig")?),
@@ -371,10 +371,40 @@ pub mod intkey {
 // Helper functions
 // ============================================
 
+/// Check if a string contains only hex characters (0-9, a-f, A-F)
+fn is_hex_string(s: &str) -> bool {
+    s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Encode a tag value optimally: if it's hex, decode to bytes (50% size reduction),
+/// otherwise store as text
+fn encode_tag_value_cbor(value: &str) -> Value {
+    if is_hex_string(value) && value.len() % 2 == 0 {
+        // Try to decode as hex - if successful, store as bytes
+        if let Ok(bytes) = hex::decode(value) {
+            return Value::Bytes(bytes);
+        }
+    }
+    // Store as text
+    Value::Text(value.to_string())
+}
+
+/// Decode a tag value from CBOR Value back to string
+fn decode_tag_value_cbor(value: &Value) -> Result<String, CborError> {
+    match value {
+        Value::Bytes(bytes) => {
+            // Decode hex bytes back to hex string
+            Ok(hex::encode(bytes))
+        }
+        Value::Text(text) => Ok(text.clone()),
+        _ => Err(CborError::ExpectedString("tag value")),
+    }
+}
+
 fn tags_to_value(tags: &[Vec<String>]) -> Value {
     Value::Array(
         tags.iter()
-            .map(|tag| Value::Array(tag.iter().map(|s| Value::Text(s.clone())).collect()))
+            .map(|tag| Value::Array(tag.iter().map(|v| encode_tag_value_cbor(v)).collect()))
             .collect(),
     )
 }
@@ -392,6 +422,16 @@ fn extract_i64(value: &Value, field: &'static str) -> Result<i64, CborError> {
         .and_then(|i| {
             let i: i128 = i.into();
             i64::try_from(i).ok()
+        })
+        .ok_or(CborError::ExpectedInteger(field))
+}
+
+fn extract_u16(value: &Value, field: &'static str) -> Result<u16, CborError> {
+    value
+        .as_integer()
+        .and_then(|i| {
+            let i: i128 = i.into();
+            u16::try_from(i).ok()
         })
         .ok_or(CborError::ExpectedInteger(field))
 }
@@ -419,14 +459,7 @@ fn extract_tags(value: &Value) -> Result<Vec<Vec<String>>, CborError> {
     arr.iter()
         .map(|tag_value| {
             let tag_arr = tag_value.as_array().ok_or(CborError::ExpectedArray)?;
-            tag_arr
-                .iter()
-                .map(|s| {
-                    s.as_text()
-                        .map(|t| t.to_string())
-                        .ok_or(CborError::ExpectedString("tag value"))
-                })
-                .collect()
+            tag_arr.iter().map(|v| decode_tag_value_cbor(v)).collect()
         })
         .collect()
 }
