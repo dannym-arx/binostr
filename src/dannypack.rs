@@ -19,16 +19,43 @@ use std::ptr;
 
 const FIXED_SIZE: usize = 138;
 
+// Combined hex validation + decode table: 0xFF = invalid, 0-15 = valid nibble
+const HEX_LUT: [u8; 256] = {
+    let mut t = [0xFFu8; 256];
+    t[b'0' as usize] = 0;
+    t[b'1' as usize] = 1;
+    t[b'2' as usize] = 2;
+    t[b'3' as usize] = 3;
+    t[b'4' as usize] = 4;
+    t[b'5' as usize] = 5;
+    t[b'6' as usize] = 6;
+    t[b'7' as usize] = 7;
+    t[b'8' as usize] = 8;
+    t[b'9' as usize] = 9;
+    t[b'a' as usize] = 10;
+    t[b'b' as usize] = 11;
+    t[b'c' as usize] = 12;
+    t[b'd' as usize] = 13;
+    t[b'e' as usize] = 14;
+    t[b'f' as usize] = 15;
+    t[b'A' as usize] = 10;
+    t[b'B' as usize] = 11;
+    t[b'C' as usize] = 12;
+    t[b'D' as usize] = 13;
+    t[b'E' as usize] = 14;
+    t[b'F' as usize] = 15;
+    t
+};
+
+const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
+
 #[inline(always)]
 unsafe fn write_varint_ptr(mut dst: *mut u8, mut value: u64) -> usize {
     let start = dst;
     loop {
-        let mut byte = (value & 0x7F) as u8;
+        let byte = (value & 0x7F) as u8;
         value >>= 7;
-        if value != 0 {
-            byte |= 0x80;
-        }
-        *dst = byte;
+        *dst = if value != 0 { byte | 0x80 } else { byte };
         dst = dst.add(1);
         if value == 0 {
             break;
@@ -42,22 +69,18 @@ unsafe fn read_varint_ptr(src: *const u8, max_len: usize) -> (u64, usize) {
     let mut result: u64 = 0;
     let mut shift = 0;
     let mut pos = 0;
-
     loop {
         if pos >= max_len {
             return (0, 0);
         }
         let byte = *src.add(pos);
         pos += 1;
-
         result |= ((byte & 0x7F) as u64) << shift;
-
         if byte & 0x80 == 0 {
             break;
         }
         shift += 7;
     }
-
     (result, pos)
 }
 
@@ -78,7 +101,6 @@ unsafe fn read_len_flag_ptr(src: *const u8, max_len: usize) -> (usize, bool, usi
     let header = *src;
     let is_hex = (header & 0x80) != 0;
     let len_or_marker = (header & 0x7F) as usize;
-
     if len_or_marker < 0x7F {
         (len_or_marker, is_hex, 1)
     } else {
@@ -87,86 +109,63 @@ unsafe fn read_len_flag_ptr(src: *const u8, max_len: usize) -> (usize, bool, usi
     }
 }
 
+/// is this POSSIBLY hex?
 #[inline(always)]
-const fn is_hex_digit(b: u8) -> bool {
-    matches!(b, b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F')
+unsafe fn might_be_hex(src: &[u8]) -> bool {
+    let len = src.len();
+    // Must be even, >= 8 chars (4 bytes min for worthwhile compression)
+    // AND first 2 chars must be hex (instant reject for text)
+    len >= 8
+        && len & 1 == 0
+        && *HEX_LUT.get_unchecked(*src.get_unchecked(0) as usize) != 0xFF
+        && *HEX_LUT.get_unchecked(*src.get_unchecked(1) as usize) != 0xFF
 }
 
+/// Hex decode - assumes caller already checked might_be_hex()
+/// Returns decoded length, or 0 if invalid hex encountered
 #[inline(always)]
-fn is_hex_string(s: &str) -> bool {
-    let bytes = s.as_bytes();
-    let len = bytes.len();
-    if len == 0 || len % 2 != 0 {
-        return false;
-    }
+unsafe fn hex_decode_checked(src: &[u8], dst: *mut u8) -> usize {
+    let len = src.len();
+    let out_len = len >> 1;
     let mut i = 0;
     while i + 8 <= len {
-        unsafe {
-            let b0 = *bytes.get_unchecked(i);
-            let b1 = *bytes.get_unchecked(i + 1);
-            let b2 = *bytes.get_unchecked(i + 2);
-            let b3 = *bytes.get_unchecked(i + 3);
-            let b4 = *bytes.get_unchecked(i + 4);
-            let b5 = *bytes.get_unchecked(i + 5);
-            let b6 = *bytes.get_unchecked(i + 6);
-            let b7 = *bytes.get_unchecked(i + 7);
-            if !is_hex_digit(b0)
-                || !is_hex_digit(b1)
-                || !is_hex_digit(b2)
-                || !is_hex_digit(b3)
-                || !is_hex_digit(b4)
-                || !is_hex_digit(b5)
-                || !is_hex_digit(b6)
-                || !is_hex_digit(b7)
-            {
-                return false;
-            }
+        let h0 = *HEX_LUT.get_unchecked(*src.get_unchecked(i) as usize);
+        let l0 = *HEX_LUT.get_unchecked(*src.get_unchecked(i + 1) as usize);
+        let h1 = *HEX_LUT.get_unchecked(*src.get_unchecked(i + 2) as usize);
+        let l1 = *HEX_LUT.get_unchecked(*src.get_unchecked(i + 3) as usize);
+        let h2 = *HEX_LUT.get_unchecked(*src.get_unchecked(i + 4) as usize);
+        let l2 = *HEX_LUT.get_unchecked(*src.get_unchecked(i + 5) as usize);
+        let h3 = *HEX_LUT.get_unchecked(*src.get_unchecked(i + 6) as usize);
+        let l3 = *HEX_LUT.get_unchecked(*src.get_unchecked(i + 7) as usize);
+
+        if (h0 | l0 | h1 | l1 | h2 | l2 | h3 | l3) & 0xF0 != 0 {
+            return 0;
         }
+
+        let out_idx = i >> 1;
+        *dst.add(out_idx) = (h0 << 4) | l0;
+        *dst.add(out_idx + 1) = (h1 << 4) | l1;
+        *dst.add(out_idx + 2) = (h2 << 4) | l2;
+        *dst.add(out_idx + 3) = (h3 << 4) | l3;
         i += 8;
     }
-    while i < len {
-        unsafe {
-            if !is_hex_digit(*bytes.get_unchecked(i)) {
-                return false;
-            }
-        }
-        i += 1;
-    }
-    true
-}
 
-#[inline(always)]
-unsafe fn hex_decode_fast(src: &[u8], dst: *mut u8) -> usize {
-    const HEX_DECODE: [u8; 256] = {
-        let mut table = [0u8; 256];
-        let mut i = 0;
-        while i < 256 {
-            table[i] = match i as u8 {
-                b'0'..=b'9' => (i as u8) - b'0',
-                b'a'..=b'f' => (i as u8) - b'a' + 10,
-                b'A'..=b'F' => (i as u8) - b'A' + 10,
-                _ => 0,
-            };
-            i += 1;
+    // Handle remaining pairs
+    while i + 2 <= len {
+        let hi = *HEX_LUT.get_unchecked(*src.get_unchecked(i) as usize);
+        let lo = *HEX_LUT.get_unchecked(*src.get_unchecked(i + 1) as usize);
+        if (hi | lo) & 0xF0 != 0 {
+            return 0;
         }
-        table
-    };
-
-    let len = src.len() / 2;
-    let mut i = 0;
-    while i < len {
-        let hi = *HEX_DECODE.get_unchecked(*src.get_unchecked(i * 2) as usize);
-        let lo = *HEX_DECODE.get_unchecked(*src.get_unchecked(i * 2 + 1) as usize);
-        *dst.add(i) = (hi << 4) | lo;
-        i += 1;
+        *dst.add(i >> 1) = (hi << 4) | lo;
+        i += 2;
     }
-    len
+
+    out_len
 }
 
 #[inline(always)]
 unsafe fn hex_encode_fast(src: &[u8], dst: *mut u8) -> usize {
-    const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
-
     let len = src.len();
     let mut i = 0;
     while i < len {
@@ -176,113 +175,6 @@ unsafe fn hex_encode_fast(src: &[u8], dst: *mut u8) -> usize {
         i += 1;
     }
     len * 2
-}
-
-pub fn serialize(event: &NostrEvent) -> Vec<u8> {
-    let tags_data_size = calc_tags_data_size(&event.tags);
-    let content_len = event.content.len();
-    let estimated = FIXED_SIZE + 5 + tags_data_size + 5 + content_len;
-
-    let mut buf = Vec::with_capacity(estimated);
-
-    unsafe {
-        buf.set_len(estimated);
-        let base = buf.as_mut_ptr();
-        let mut ptr = base;
-
-        ptr::copy_nonoverlapping(event.id.as_ptr(), ptr, 32);
-        ptr::copy_nonoverlapping(event.pubkey.as_ptr(), ptr.add(32), 32);
-        ptr::copy_nonoverlapping(event.sig.as_ptr(), ptr.add(64), 64);
-        ptr = ptr.add(128);
-
-        *(ptr as *mut [u8; 8]) = event.created_at.to_le_bytes();
-        ptr = ptr.add(8);
-        *(ptr as *mut [u8; 2]) = event.kind.to_le_bytes();
-        ptr = ptr.add(2);
-
-        let len_bytes = write_varint_ptr(ptr, tags_data_size as u64);
-        ptr = ptr.add(len_bytes);
-
-        ptr = pack_tags_raw(ptr, &event.tags);
-
-        let content_bytes = event.content.as_bytes();
-        let len = content_bytes.len();
-        let header_bytes = write_len_flag_ptr(ptr, len, false);
-        ptr = ptr.add(header_bytes);
-        ptr::copy_nonoverlapping(content_bytes.as_ptr(), ptr, len);
-        ptr = ptr.add(len);
-
-        buf.set_len(ptr.offset_from(base) as usize);
-    }
-
-    buf
-}
-
-pub fn serialize_compact(event: &NostrEvent) -> Vec<u8> {
-    let estimated = FIXED_SIZE + 10 + estimate_tags_size(&event.tags) + event.content.len();
-    let mut buf = Vec::with_capacity(estimated);
-
-    unsafe {
-        buf.set_len(estimated);
-        let base = buf.as_mut_ptr();
-        let mut ptr = base;
-
-        ptr::copy_nonoverlapping(event.id.as_ptr(), ptr, 32);
-        ptr::copy_nonoverlapping(event.pubkey.as_ptr(), ptr.add(32), 32);
-        ptr::copy_nonoverlapping(event.sig.as_ptr(), ptr.add(64), 64);
-        ptr = ptr.add(128);
-        *(ptr as *mut [u8; 8]) = event.created_at.to_le_bytes();
-        ptr = ptr.add(8);
-        *(ptr as *mut [u8; 2]) = event.kind.to_le_bytes();
-        ptr = ptr.add(2);
-
-        let mut tag_buf = Vec::with_capacity(estimate_tags_size(&event.tags));
-        tag_buf.set_len(tag_buf.capacity());
-        let tag_end = pack_tags_fast(&event.tags, tag_buf.as_mut_ptr());
-        let tags_len = tag_end.offset_from(tag_buf.as_ptr()) as usize;
-
-        let len_bytes = write_varint_ptr(ptr, tags_len as u64);
-        ptr = ptr.add(len_bytes);
-        ptr::copy_nonoverlapping(tag_buf.as_ptr(), ptr, tags_len);
-        ptr = ptr.add(tags_len);
-
-        let content_bytes = event.content.as_bytes();
-        if is_hex_string(&event.content) {
-            let decoded_len = content_bytes.len() / 2;
-            let header_bytes = write_len_flag_ptr(ptr, decoded_len, true);
-            ptr = ptr.add(header_bytes);
-            hex_decode_fast(content_bytes, ptr);
-            ptr = ptr.add(decoded_len);
-        } else {
-            let len = content_bytes.len();
-            let header_bytes = write_len_flag_ptr(ptr, len, false);
-            ptr = ptr.add(header_bytes);
-            ptr::copy_nonoverlapping(content_bytes.as_ptr(), ptr, len);
-            ptr = ptr.add(len);
-        }
-
-        buf.set_len(ptr.offset_from(base) as usize);
-    }
-
-    buf
-}
-
-#[inline(always)]
-fn calc_tags_data_size(tags: &[Vec<String>]) -> usize {
-    let mut size = varint_size(tags.len() as u64);
-    for tag in tags {
-        size += 1;
-        for value in tag {
-            let len = value.len();
-            size += if len < 0x7F {
-                1
-            } else {
-                1 + varint_size(len as u64)
-            };
-            size += len;
-        }
-    }
-    size
 }
 
 #[inline(always)]
@@ -295,8 +187,95 @@ const fn varint_size(mut value: u64) -> usize {
     size
 }
 
+pub fn serialize(event: &NostrEvent) -> Vec<u8> {
+    let max_tags_size = calc_max_tags_size(&event.tags);
+    let content_len = event.content.len();
+    let estimated = FIXED_SIZE + 5 + max_tags_size + 5 + content_len;
+
+    let mut buf = Vec::with_capacity(estimated);
+
+    unsafe {
+        buf.set_len(estimated);
+        let base = buf.as_mut_ptr();
+        let mut ptr = base;
+
+        ptr::copy_nonoverlapping(event.id.as_ptr(), ptr, 32);
+        ptr::copy_nonoverlapping(event.pubkey.as_ptr(), ptr.add(32), 32);
+        ptr::copy_nonoverlapping(event.sig.as_ptr(), ptr.add(64), 64);
+        ptr = ptr.add(128);
+
+        *(ptr as *mut [u8; 8]) = event.created_at.to_le_bytes();
+        ptr = ptr.add(8);
+        *(ptr as *mut [u8; 2]) = event.kind.to_le_bytes();
+        ptr = ptr.add(2);
+
+        let tag_len_ptr = ptr;
+        ptr = ptr.add(5);
+        let tag_data_start = ptr;
+
+        ptr = pack_tags_fast(ptr, &event.tags);
+
+        let tag_data_len = ptr.offset_from(tag_data_start) as usize;
+        let varint_len = write_varint_ptr(tag_len_ptr, tag_data_len as u64);
+        if varint_len < 5 {
+            ptr::copy(tag_data_start, tag_len_ptr.add(varint_len), tag_data_len);
+            ptr = tag_len_ptr.add(varint_len + tag_data_len);
+        }
+
+        let content_bytes = event.content.as_bytes();
+
+        if might_be_hex(content_bytes) {
+            let header_ptr = ptr;
+            ptr = ptr.add(5);
+            let decoded_len = hex_decode_checked(content_bytes, ptr);
+            if decoded_len > 0 {
+                let header_len = write_len_flag_ptr(header_ptr, decoded_len, true);
+                if header_len < 5 {
+                    ptr::copy(ptr, header_ptr.add(header_len), decoded_len);
+                }
+                ptr = header_ptr.add(header_len + decoded_len);
+            } else {
+                ptr = header_ptr;
+                let len = content_bytes.len();
+                let header_len = write_len_flag_ptr(ptr, len, false);
+                ptr = ptr.add(header_len);
+                ptr::copy_nonoverlapping(content_bytes.as_ptr(), ptr, len);
+                ptr = ptr.add(len);
+            }
+        } else {
+            let len = content_bytes.len();
+            let header_len = write_len_flag_ptr(ptr, len, false);
+            ptr = ptr.add(header_len);
+            ptr::copy_nonoverlapping(content_bytes.as_ptr(), ptr, len);
+            ptr = ptr.add(len);
+        }
+
+        buf.set_len(ptr.offset_from(base) as usize);
+    }
+
+    buf
+}
+
 #[inline(always)]
-unsafe fn pack_tags_raw(mut dst: *mut u8, tags: &[Vec<String>]) -> *mut u8 {
+fn calc_max_tags_size(tags: &[Vec<String>]) -> usize {
+    let mut size = varint_size(tags.len() as u64);
+    for tag in tags {
+        size += 1;
+        for value in tag {
+            let len = value.len();
+            size += if len < 0x7F {
+                1
+            } else {
+                1 + varint_size(len as u64)
+            };
+            size += len; // worst case: no hex compression
+        }
+    }
+    size
+}
+
+#[inline(always)]
+unsafe fn pack_tags_fast(mut dst: *mut u8, tags: &[Vec<String>]) -> *mut u8 {
     dst = dst.add(write_varint_ptr(dst, tags.len() as u64));
 
     for tag in tags {
@@ -307,47 +286,27 @@ unsafe fn pack_tags_raw(mut dst: *mut u8, tags: &[Vec<String>]) -> *mut u8 {
             let bytes = value.as_bytes();
             let len = bytes.len();
 
-            dst = dst.add(write_len_flag_ptr(dst, len, false));
-            ptr::copy_nonoverlapping(bytes.as_ptr(), dst, len);
-            dst = dst.add(len);
-        }
-    }
-
-    dst
-}
-
-#[inline(always)]
-fn estimate_tags_size(tags: &[Vec<String>]) -> usize {
-    let mut size = 5;
-    for tag in tags {
-        size += 1;
-        for value in tag {
-            size += 3 + value.len();
-        }
-    }
-    size
-}
-
-#[inline(always)]
-unsafe fn pack_tags_fast(tags: &[Vec<String>], mut dst: *mut u8) -> *mut u8 {
-    dst = dst.add(write_varint_ptr(dst, tags.len() as u64));
-
-    for tag in tags {
-        *dst = tag.len() as u8;
-        dst = dst.add(1);
-
-        for value in tag {
-            let value_bytes = value.as_bytes();
-
-            if is_hex_string(value) {
-                let decoded_len = value_bytes.len() / 2;
-                dst = dst.add(write_len_flag_ptr(dst, decoded_len, true));
-                hex_decode_fast(value_bytes, dst);
-                dst = dst.add(decoded_len);
+            if might_be_hex(bytes) {
+                let header_ptr = dst;
+                dst = dst.add(5);
+                let decoded_len = hex_decode_checked(bytes, dst);
+                if decoded_len > 0 {
+                    let header_len = write_len_flag_ptr(header_ptr, decoded_len, true);
+                    if header_len < 5 {
+                        ptr::copy(dst, header_ptr.add(header_len), decoded_len);
+                    }
+                    dst = header_ptr.add(header_len + decoded_len);
+                } else {
+                    dst = header_ptr;
+                    let header_len = write_len_flag_ptr(dst, len, false);
+                    dst = dst.add(header_len);
+                    ptr::copy_nonoverlapping(bytes.as_ptr(), dst, len);
+                    dst = dst.add(len);
+                }
             } else {
-                let len = value_bytes.len();
-                dst = dst.add(write_len_flag_ptr(dst, len, false));
-                ptr::copy_nonoverlapping(value_bytes.as_ptr(), dst, len);
+                let header_len = write_len_flag_ptr(dst, len, false);
+                dst = dst.add(header_len);
+                ptr::copy_nonoverlapping(bytes.as_ptr(), dst, len);
                 dst = dst.add(len);
             }
         }
