@@ -69,11 +69,24 @@ Standard NIP-01 JSON format with hex-encoded cryptographic fields.
 - **Packed Array**: Positional encoding `[id, pubkey, created_at, kind, tags, content, sig]`
 - **Integer-Keyed Map**: `{0: id, 1: pubkey, ...}` for extensibility
 
+All CBOR variants use hex-to-binary optimization for tag values (e.g., event IDs in `e` tags are stored as 32 bytes instead of 64 hex characters).
+
 ### Cap'n Proto
 - Zero-copy serialization format - the wire format IS the in-memory representation
 - Extremely fast serialization (~254ns) because there's no encoding step
 - Larger size due to alignment/padding for direct memory access
+- Supports selective field access without full deserialization
 - See [capnproto.org](https://capnproto.org/) for details
+
+### DannyPack
+Custom binary format designed specifically for Nostr events:
+- Fixed 138-byte header for cryptographic fields and metadata
+- Varint encoding for compact length prefixes
+- Automatic hex-to-binary conversion for tag values
+- Ultra-fast serialization using unsafe pointer operations
+- Safe variant (`deserialize_safe`) available for untrusted input
+
+See `src/dannypack.rs` for detailed wire format documentation.
 
 ## Usage
 
@@ -96,11 +109,36 @@ cargo bench --bench serialize
 # Deserialization speed
 cargo bench --bench deserialize
 
-# Per-kind analysis
+# Per-kind analysis (profile, notes, follows, etc.)
 cargo bench --bench by_kind
+
+# Per-category analysis (size and tag count categories)
+cargo bench --bench by_category
+
+# Zero-copy field access (Cap'n Proto's advantage)
+cargo bench --bench zero_copy
 
 # Size comparison report
 cargo bench --bench size_analysis
+
+# For faster iteration during development (less statistically rigorous):
+BINOSTR_FAST_BENCH=1 cargo bench
+```
+
+### Quick Benchmark Report
+
+```bash
+# Run comprehensive benchmark with comparison tables
+cargo run --release --example bench_report
+```
+
+This produces a single report comparing all formats on serialization speed, deserialization speed, and wire size with rankings and recommendations.
+
+### Analysis Tools
+
+```bash
+# Batch overhead analysis
+cargo run --example batch_analysis
 ```
 
 ## Benchmark Methodology
@@ -181,14 +219,27 @@ binostr/
 │   ├── lib.rs          # Library exports
 │   ├── event.rs        # NostrEvent struct
 │   ├── loader.rs       # .pb.gz file loader
-│   ├── sampler.rs      # Random sampling
+│   ├── sampler.rs      # Random sampling with excluded kinds
 │   ├── json.rs         # JSON serialization
-│   ├── cbor.rs         # CBOR variants
+│   ├── cbor.rs         # CBOR variants (with hex optimization)
 │   ├── proto.rs        # Protobuf variants
-│   ├── capnp.rs        # Cap'n Proto serialization
-│   └── stats.rs        # Analysis utilities
-├── benches/            # Criterion benchmarks
-├── examples/           # Analysis tools
+│   ├── capnp.rs        # Cap'n Proto (with zero-copy field access)
+│   ├── dannypack.rs    # Custom binary format (safe & unsafe variants)
+│   └── stats.rs        # Analysis utilities & compression helpers
+├── benches/
+│   ├── serialize.rs    # Serialization speed benchmarks
+│   ├── deserialize.rs  # Deserialization speed benchmarks
+│   ├── by_kind.rs      # Per-kind benchmarks (profile, notes, etc.)
+│   ├── by_category.rs  # Per-category benchmarks (size, tag count)
+│   ├── zero_copy.rs    # Zero-copy field access benchmarks
+│   ├── size_analysis.rs # Size comparison report
+│   └── common.rs       # Shared benchmark utilities
+├── tests/
+│   └── roundtrip.rs    # Comprehensive roundtrip tests
+├── examples/
+│   ├── analyze_data.rs # Event distribution analysis
+│   ├── size_report.rs  # Size comparison report
+│   └── batch_analysis.rs # Batch overhead analysis
 └── docs/
     ├── nostr.proto         # Original protobuf schema
     ├── nostr_binary.proto  # Binary-optimized schema

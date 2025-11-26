@@ -121,7 +121,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Print kind distribution
-    let mut kinds: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    let mut kinds: std::collections::HashMap<u16, usize> = std::collections::HashMap::new();
     for event in &sample {
         *kinds.entry(event.kind).or_insert(0) += 1;
     }

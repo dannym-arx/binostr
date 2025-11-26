@@ -17,6 +17,7 @@ pub enum Format {
     Json,
     CborSchemaless,
     CborPacked,
+    CborPackedNoHexOpt,
     CborIntKey,
     ProtoString,
     ProtoBinary,
@@ -26,6 +27,7 @@ pub enum Format {
 }
 
 impl Format {
+    /// Returns all primary formats for benchmarking
     pub fn all() -> &'static [Format] {
         &[
             Format::Json,
@@ -40,11 +42,28 @@ impl Format {
         ]
     }
 
+    /// Returns all formats including comparison variants
+    pub fn all_with_variants() -> &'static [Format] {
+        &[
+            Format::Json,
+            Format::CborSchemaless,
+            Format::CborPacked,
+            Format::CborPackedNoHexOpt,
+            Format::CborIntKey,
+            Format::ProtoString,
+            Format::ProtoBinary,
+            Format::CapnProto,
+            Format::CapnProtoPacked,
+            Format::DannyPack,
+        ]
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             Format::Json => "JSON",
             Format::CborSchemaless => "CBOR Schemaless",
             Format::CborPacked => "CBOR Packed",
+            Format::CborPackedNoHexOpt => "CBOR Packed (no hex opt)",
             Format::CborIntKey => "CBOR IntKey",
             Format::ProtoString => "Proto String",
             Format::ProtoBinary => "Proto Binary",
@@ -59,6 +78,7 @@ impl Format {
             Format::Json => "json",
             Format::CborSchemaless => "cbor_schema",
             Format::CborPacked => "cbor_packed",
+            Format::CborPackedNoHexOpt => "cbor_no_hex",
             Format::CborIntKey => "cbor_intkey",
             Format::ProtoString => "proto_str",
             Format::ProtoBinary => "proto_bin",
@@ -75,6 +95,7 @@ pub fn serialize(event: &NostrEvent, format: Format) -> Vec<u8> {
         Format::Json => json::serialize(event),
         Format::CborSchemaless => cbor::schemaless::serialize(event),
         Format::CborPacked => cbor::packed::serialize(event),
+        Format::CborPackedNoHexOpt => cbor::packed_no_hex_opt::serialize(event),
         Format::CborIntKey => cbor::intkey::serialize(event),
         Format::ProtoString => proto::string::serialize(event),
         Format::ProtoBinary => proto::binary::serialize(event),
@@ -90,6 +111,14 @@ pub fn serialize_batch(events: &[NostrEvent], format: Format) -> Vec<u8> {
         Format::Json => json::serialize_batch(events),
         Format::CborSchemaless => cbor::schemaless::serialize_batch(events),
         Format::CborPacked => cbor::packed::serialize_batch(events),
+        Format::CborPackedNoHexOpt => {
+            // No batch implementation for this variant, serialize individually
+            let mut buf = Vec::new();
+            for event in events {
+                buf.extend(cbor::packed_no_hex_opt::serialize(event));
+            }
+            buf
+        }
         Format::CborIntKey => cbor::intkey::serialize_batch(events),
         Format::ProtoString => proto::string::serialize_batch(events),
         Format::ProtoBinary => proto::binary::serialize_batch(events),
@@ -351,16 +380,67 @@ pub fn generate_size_report(events: &[NostrEvent]) -> String {
     report
 }
 
-/// Compress data with gzip and return the size
-fn gzip_size(data: &[u8]) -> usize {
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::new(6));
+// ============================================
+// Compression utilities
+// ============================================
+
+/// Default gzip compression level for benchmarks.
+/// Level 6 is gzip's default, providing good balance of speed and ratio.
+/// Range: 0 (no compression) to 9 (maximum compression).
+pub const DEFAULT_GZIP_LEVEL: u32 = 6;
+
+/// Default zstd compression level for benchmarks.
+/// Level 3 is zstd's default, providing good balance of speed and ratio.
+/// Range: 1 (fastest) to 22 (maximum compression).
+pub const DEFAULT_ZSTD_LEVEL: i32 = 3;
+
+/// Compress data with gzip at default level (6) and return the size
+pub fn gzip_size(data: &[u8]) -> usize {
+    gzip_size_level(data, DEFAULT_GZIP_LEVEL)
+}
+
+/// Compress data with gzip at specified level and return the size
+pub fn gzip_size_level(data: &[u8], level: u32) -> usize {
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::new(level));
     encoder.write_all(data).unwrap();
     encoder.finish().unwrap().len()
 }
 
-/// Compress data with zstd and return the size
-fn zstd_size(data: &[u8]) -> usize {
-    zstd::encode_all(data, 3).unwrap().len()
+/// Compress data with zstd at default level (3) and return the size
+pub fn zstd_size(data: &[u8]) -> usize {
+    zstd_size_level(data, DEFAULT_ZSTD_LEVEL)
+}
+
+/// Compress data with zstd at specified level and return the size
+pub fn zstd_size_level(data: &[u8], level: i32) -> usize {
+    zstd::encode_all(data, level).unwrap().len()
+}
+
+/// Compare compression ratios at multiple levels
+pub fn compare_compression_levels(data: &[u8]) -> CompressionComparison {
+    CompressionComparison {
+        raw_size: data.len(),
+        gzip_1: gzip_size_level(data, 1),
+        gzip_6: gzip_size_level(data, 6),
+        gzip_9: gzip_size_level(data, 9),
+        zstd_1: zstd_size_level(data, 1),
+        zstd_3: zstd_size_level(data, 3),
+        zstd_9: zstd_size_level(data, 9),
+        zstd_19: zstd_size_level(data, 19),
+    }
+}
+
+/// Compression comparison at multiple levels
+#[derive(Debug, Clone)]
+pub struct CompressionComparison {
+    pub raw_size: usize,
+    pub gzip_1: usize,
+    pub gzip_6: usize,
+    pub gzip_9: usize,
+    pub zstd_1: usize,
+    pub zstd_3: usize,
+    pub zstd_9: usize,
+    pub zstd_19: usize,
 }
 
 #[cfg(test)]

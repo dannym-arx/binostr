@@ -11,21 +11,33 @@ use rand::seq::SliceRandom;
 use crate::event::{NostrEvent, SizeCategory, TagCategory};
 use crate::loader::LoadError;
 
-/// Event kinds to exclude from benchmarks (non-standard or unknown kinds)
-/// These are kinds that appeared in the dataset but aren't in the NIPs
+/// Event kinds to exclude from benchmarks.
+///
+/// These are kinds that appeared in the dataset but are either:
+/// - Not documented in any NIP
+/// - Application-specific custom kinds
+/// - Test/spam kinds
+///
+/// Excluding these ensures benchmarks focus on representative real-world events.
+///
+/// Note: Kind numbers and their purposes:
+/// - 0-9999: Regular events (stored by relays)
+/// - 10000-19999: Replaceable events (only latest stored)
+/// - 20000-29999: Ephemeral events (not stored)
+/// - 30000-39999: Addressable events (identified by kind+pubkey+d-tag)
 pub const EXCLUDED_KINDS: &[u16] = &[
-    443,   // Unknown
-    1000,  // Unknown
-    1009,  // Unknown
-    10174, // Unknown
-    11998, // Unknown
-    30166, // Unknown
-    31111, // Unknown
-    31234, // Unknown
-    31402, // Unknown
-    32222, // Unknown
-    38225, // Unknown
-    38383, // Unknown
+    443,   // Unknown - not in any NIP
+    1000,  // Unknown - not in any NIP (regular range)
+    1009,  // Unknown - not in any NIP (regular range)
+    10174, // Unknown - not in any NIP (replaceable range)
+    11998, // Unknown - not in any NIP (replaceable range)
+    30166, // Unknown - not in any NIP (addressable range)
+    31111, // Unknown - not in any NIP (addressable range)
+    31234, // Unknown - not in any NIP (addressable range)
+    31402, // Unknown - not in any NIP (addressable range)
+    32222, // Unknown - not in any NIP (addressable range)
+    38225, // Unknown - not in any NIP (addressable range)
+    38383, // Unknown - not in any NIP (addressable range)
 ];
 
 /// Event sampler for creating benchmark datasets

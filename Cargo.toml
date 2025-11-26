@@ -52,3 +52,11 @@ harness = false
 [[bench]]
 name = "size_analysis"
 harness = false
+
+[[bench]]
+name = "by_category"
+harness = false
+
+[[bench]]
+name = "zero_copy"
+harness = false

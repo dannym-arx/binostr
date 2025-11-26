@@ -4,15 +4,64 @@ use binostr::{EventSampler, NostrEvent};
 use criterion::Criterion;
 use std::time::Duration;
 
-/// Create a fast Criterion configuration for quicker iterations
-/// Use `cargo bench` for normal runs, `cargo bench -- --quick` isn't needed with this
+/// Default Criterion configuration for benchmarks.
+///
+/// Uses Criterion's defaults which provide statistically sound results:
+/// - 100 samples
+/// - 5s measurement time
+/// - 3s warm-up time
+/// - 95% confidence level
+#[allow(dead_code)]
+pub fn default_criterion() -> Criterion {
+    Criterion::default()
+}
+
+/// Create a fast Criterion configuration for quicker iterations during development.
+///
+/// Use by temporarily changing the benchmark config, or set env var:
+/// `BINOSTR_FAST_BENCH=1 cargo bench`
+///
+/// Settings:
+/// - 30 samples (default: 100) - faster iteration
+/// - 2s measurement time (default: 5s) - quicker feedback
+/// - 500ms warm-up (default: 3s) - reduced warm-up
+/// - 90% confidence (default: 95%) - acceptable for development
 #[allow(dead_code)]
 pub fn fast_criterion() -> Criterion {
     Criterion::default()
-        .sample_size(30) // Default: 100
-        .measurement_time(Duration::from_secs(2)) // Default: 5s
-        .warm_up_time(Duration::from_millis(500)) // Default: 3s
-        .confidence_level(0.90) // Default: 0.95
+        .sample_size(30)
+        .measurement_time(Duration::from_secs(2))
+        .warm_up_time(Duration::from_millis(500))
+        .confidence_level(0.90)
+}
+
+/// Create a publication-quality Criterion configuration for final benchmark runs.
+///
+/// More rigorous than defaults for publishable results:
+/// - 100 samples - statistically robust
+/// - 10s measurement time - thorough measurement
+/// - 5s warm-up - ensure CPU caches are hot
+/// - 95% confidence - publication-quality significance
+/// - Noise threshold 0.01 - detect small improvements
+#[allow(dead_code)]
+pub fn publication_criterion() -> Criterion {
+    Criterion::default()
+        .sample_size(100)
+        .measurement_time(Duration::from_secs(10))
+        .warm_up_time(Duration::from_secs(5))
+        .confidence_level(0.95)
+        .noise_threshold(0.01)
+        .significance_level(0.05)
+}
+
+/// Select criterion config based on environment.
+/// Set `BINOSTR_FAST_BENCH=1` for fast development iterations.
+pub fn auto_criterion() -> Criterion {
+    if std::env::var("BINOSTR_FAST_BENCH").is_ok() {
+        fast_criterion()
+    } else {
+        default_criterion()
+    }
 }
 
 /// Default data directory

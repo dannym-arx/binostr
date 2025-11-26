@@ -156,6 +156,10 @@ fn bench_deserialize_batch(c: &mut Criterion) {
     group.finish();
 }
 
+/// Throughput benchmark measuring events/second (fair comparison across formats)
+///
+/// Uses Throughput::Elements to measure events processed per second,
+/// which provides fair comparison regardless of wire format size.
 fn bench_deserialize_throughput(c: &mut Criterion) {
     let events = common::load_sample(1000);
 
@@ -175,10 +179,11 @@ fn bench_deserialize_throughput(c: &mut Criterion) {
     let capnp_packed_data: Vec<_> = events.iter().map(capnp::serialize_event_packed).collect();
     let dannypack_data: Vec<_> = events.iter().map(dannypack::serialize).collect();
 
-    let total_json_bytes: usize = json_data.iter().map(|d| d.len()).sum();
+    let event_count = events.len() as u64;
 
+    // Use events/sec for fair comparison across formats with different wire sizes
     let mut group = c.benchmark_group("deserialize_throughput");
-    group.throughput(Throughput::Bytes(total_json_bytes as u64));
+    group.throughput(Throughput::Elements(event_count));
 
     group.bench_function("json", |b| {
         b.iter(|| {
@@ -255,9 +260,60 @@ fn bench_deserialize_throughput(c: &mut Criterion) {
     group.finish();
 }
 
+/// Throughput benchmark measuring bytes/second for each format
+///
+/// This measures actual wire bytes processed per second for each format,
+/// useful for understanding how formats perform relative to their own size.
+fn bench_deserialize_bytes_throughput(c: &mut Criterion) {
+    let events = common::load_sample(1000);
+
+    if events.is_empty() {
+        eprintln!("No events loaded, skipping benchmarks");
+        return;
+    }
+
+    // Pre-serialize all events and compute format-specific sizes
+    let json_data: Vec<_> = events.iter().map(json::serialize).collect();
+    let cbor_schemaless_data: Vec<_> = events.iter().map(cbor::schemaless::serialize).collect();
+    let cbor_packed_data: Vec<_> = events.iter().map(cbor::packed::serialize).collect();
+    let cbor_intkey_data: Vec<_> = events.iter().map(cbor::intkey::serialize).collect();
+    let proto_string_data: Vec<_> = events.iter().map(proto::string::serialize).collect();
+    let proto_binary_data: Vec<_> = events.iter().map(proto::binary::serialize).collect();
+    let capnp_data: Vec<_> = events.iter().map(capnp::serialize_event).collect();
+    let capnp_packed_data: Vec<_> = events.iter().map(capnp::serialize_event_packed).collect();
+    let dannypack_data: Vec<_> = events.iter().map(dannypack::serialize).collect();
+
+    // Helper to run benchmark with format-specific byte throughput
+    macro_rules! bench_with_bytes {
+        ($group:expr, $name:expr, $data:expr, $deserialize:expr) => {{
+            let total_bytes: usize = $data.iter().map(|d| d.len()).sum();
+            let mut group = c.benchmark_group(format!("deserialize_bytes/{}", $name));
+            group.throughput(Throughput::Bytes(total_bytes as u64));
+            group.bench_function($name, |b| {
+                b.iter(|| {
+                    for data in &$data {
+                        black_box($deserialize(data).unwrap());
+                    }
+                })
+            });
+            group.finish();
+        }};
+    }
+
+    bench_with_bytes!(c, "json", json_data, json::deserialize);
+    bench_with_bytes!(c, "cbor_schemaless", cbor_schemaless_data, cbor::schemaless::deserialize);
+    bench_with_bytes!(c, "cbor_packed", cbor_packed_data, cbor::packed::deserialize);
+    bench_with_bytes!(c, "cbor_intkey", cbor_intkey_data, cbor::intkey::deserialize);
+    bench_with_bytes!(c, "proto_string", proto_string_data, proto::string::deserialize);
+    bench_with_bytes!(c, "proto_binary", proto_binary_data, proto::binary::deserialize);
+    bench_with_bytes!(c, "capnp", capnp_data, capnp::deserialize_event);
+    bench_with_bytes!(c, "capnp_packed", capnp_packed_data, capnp::deserialize_event_packed);
+    bench_with_bytes!(c, "dannypack", dannypack_data, dannypack::deserialize);
+}
+
 criterion_group! {
     name = benches;
-    config = common::fast_criterion();
-    targets = bench_deserialize_single, bench_deserialize_batch, bench_deserialize_throughput
+    config = common::auto_criterion();
+    targets = bench_deserialize_single, bench_deserialize_batch, bench_deserialize_throughput, bench_deserialize_bytes_throughput
 }
 criterion_main!(benches);

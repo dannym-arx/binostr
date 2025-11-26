@@ -186,7 +186,7 @@ fn bench_kind_30023_articles(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = common::fast_criterion();
+    config = common::auto_criterion();
     targets = bench_kind_0_profile, bench_kind_1_notes, bench_kind_3_follows,
               bench_kind_4_dms, bench_kind_7_reactions, bench_kind_10002_relays,
               bench_kind_30023_articles

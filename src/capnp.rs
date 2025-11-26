@@ -396,6 +396,80 @@ pub fn deserialize_batch_packed(data: &[u8]) -> Result<Vec<NostrEvent>, CapnpErr
     Ok(events)
 }
 
+// ============================================
+// Zero-copy field access (Cap'n Proto's strength)
+// ============================================
+
+/// Read only the `kind` field from a Cap'n Proto encoded event without full deserialization.
+/// This demonstrates Cap'n Proto's zero-copy advantage for selective field access.
+pub fn read_kind(data: &[u8]) -> Result<u16, CapnpError> {
+    let reader = serialize::read_message(data, ReaderOptions::new())?;
+    let event_reader = reader.get_root::<nostr_event::Reader>()?;
+
+    let fixed_data = event_reader.get_fixed_data()?;
+    if fixed_data.len() < FIXED_DATA_SIZE {
+        return Err(CapnpError::InvalidLength("fixed data too short"));
+    }
+
+    Ok(u16::from_le_bytes([fixed_data[136], fixed_data[137]]))
+}
+
+/// Read only the `created_at` field from a Cap'n Proto encoded event without full deserialization.
+pub fn read_created_at(data: &[u8]) -> Result<i64, CapnpError> {
+    let reader = serialize::read_message(data, ReaderOptions::new())?;
+    let event_reader = reader.get_root::<nostr_event::Reader>()?;
+
+    let fixed_data = event_reader.get_fixed_data()?;
+    if fixed_data.len() < FIXED_DATA_SIZE {
+        return Err(CapnpError::InvalidLength("fixed data too short"));
+    }
+
+    Ok(i64::from_le_bytes(fixed_data[128..136].try_into().unwrap()))
+}
+
+/// Read only the `id` field from a Cap'n Proto encoded event without full deserialization.
+pub fn read_id(data: &[u8]) -> Result<[u8; 32], CapnpError> {
+    let reader = serialize::read_message(data, ReaderOptions::new())?;
+    let event_reader = reader.get_root::<nostr_event::Reader>()?;
+
+    let fixed_data = event_reader.get_fixed_data()?;
+    if fixed_data.len() < FIXED_DATA_SIZE {
+        return Err(CapnpError::InvalidLength("fixed data too short"));
+    }
+
+    Ok(fixed_data[0..32].try_into().unwrap())
+}
+
+/// Read only the `pubkey` field from a Cap'n Proto encoded event without full deserialization.
+pub fn read_pubkey(data: &[u8]) -> Result<[u8; 32], CapnpError> {
+    let reader = serialize::read_message(data, ReaderOptions::new())?;
+    let event_reader = reader.get_root::<nostr_event::Reader>()?;
+
+    let fixed_data = event_reader.get_fixed_data()?;
+    if fixed_data.len() < FIXED_DATA_SIZE {
+        return Err(CapnpError::InvalidLength("fixed data too short"));
+    }
+
+    Ok(fixed_data[32..64].try_into().unwrap())
+}
+
+/// Read multiple fields (kind + pubkey) from a Cap'n Proto encoded event.
+/// This shows the efficiency of reading multiple fields with a single message parse.
+pub fn read_kind_and_pubkey(data: &[u8]) -> Result<(u16, [u8; 32]), CapnpError> {
+    let reader = serialize::read_message(data, ReaderOptions::new())?;
+    let event_reader = reader.get_root::<nostr_event::Reader>()?;
+
+    let fixed_data = event_reader.get_fixed_data()?;
+    if fixed_data.len() < FIXED_DATA_SIZE {
+        return Err(CapnpError::InvalidLength("fixed data too short"));
+    }
+
+    let kind = u16::from_le_bytes([fixed_data[136], fixed_data[137]]);
+    let pubkey: [u8; 32] = fixed_data[32..64].try_into().unwrap();
+
+    Ok((kind, pubkey))
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CapnpError {
     #[error("Cap'n Proto error: {0}")]

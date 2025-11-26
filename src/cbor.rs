@@ -368,6 +368,91 @@ pub mod intkey {
 }
 
 // ============================================
+// Variant 4: Packed Array without hex optimization
+// ============================================
+
+/// CBOR packed format without hex-to-binary optimization for tag values.
+/// This variant is useful for comparing the impact of hex optimization.
+pub mod packed_no_hex_opt {
+    use super::*;
+
+    pub fn serialize(event: &NostrEvent) -> Vec<u8> {
+        let value = Value::Array(vec![
+            Value::Bytes(event.id.to_vec()),
+            Value::Bytes(event.pubkey.to_vec()),
+            Value::Integer(event.created_at.into()),
+            Value::Integer(event.kind.into()),
+            tags_to_value_no_opt(&event.tags),
+            Value::Text(event.content.clone()),
+            Value::Bytes(event.sig.to_vec()),
+        ]);
+
+        let mut buf = Vec::new();
+        ciborium::into_writer(&value, &mut buf).expect("CBOR serialization should not fail");
+        buf
+    }
+
+    pub fn deserialize(data: &[u8]) -> Result<NostrEvent, CborError> {
+        let value: Value = ciborium::from_reader(data)?;
+
+        let arr = value.as_array().ok_or(CborError::ExpectedArray)?;
+        if arr.len() != 7 {
+            return Err(CborError::InvalidLength("event array"));
+        }
+
+        let id = extract_bytes(&arr[0], "id")?;
+        let pubkey = extract_bytes(&arr[1], "pubkey")?;
+        let created_at = extract_i64(&arr[2], "created_at")?;
+        let kind = extract_u16(&arr[3], "kind")?;
+        let tags = extract_tags_no_opt(&arr[4])?;
+        let content = extract_string(&arr[5], "content")?;
+        let sig = extract_bytes(&arr[6], "sig")?;
+
+        Ok(NostrEvent {
+            id: id.try_into().map_err(|_| CborError::InvalidLength("id"))?,
+            pubkey: pubkey
+                .try_into()
+                .map_err(|_| CborError::InvalidLength("pubkey"))?,
+            created_at,
+            kind,
+            tags,
+            content,
+            sig: sig
+                .try_into()
+                .map_err(|_| CborError::InvalidLength("sig"))?,
+        })
+    }
+
+    fn tags_to_value_no_opt(tags: &[Vec<String>]) -> Value {
+        Value::Array(
+            tags.iter()
+                .map(|tag| {
+                    Value::Array(tag.iter().map(|v| Value::Text(v.clone())).collect())
+                })
+                .collect(),
+        )
+    }
+
+    fn extract_tags_no_opt(value: &Value) -> Result<Vec<Vec<String>>, CborError> {
+        let arr = value.as_array().ok_or(CborError::ExpectedArray)?;
+
+        arr.iter()
+            .map(|tag_value| {
+                let tag_arr = tag_value.as_array().ok_or(CborError::ExpectedArray)?;
+                tag_arr
+                    .iter()
+                    .map(|v| {
+                        v.as_text()
+                            .map(|s| s.to_string())
+                            .ok_or(CborError::ExpectedString("tag value"))
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+}
+
+// ============================================
 // Helper functions
 // ============================================
 
@@ -377,7 +462,12 @@ fn is_hex_string(s: &str) -> bool {
 }
 
 /// Encode a tag value optimally: if it's hex, decode to bytes (50% size reduction),
-/// otherwise store as text
+/// otherwise store as text.
+///
+/// This optimization is significant for Nostr events because:
+/// - Event IDs in `e` tags are 64-char hex → 32 bytes (50% savings)
+/// - Public keys in `p` tags are 64-char hex → 32 bytes (50% savings)
+/// - Many relay URLs and other values are NOT hex and stored as-is
 fn encode_tag_value_cbor(value: &str) -> Value {
     if is_hex_string(value) && value.len().is_multiple_of(2) {
         // Try to decode as hex - if successful, store as bytes

@@ -1,391 +1,477 @@
-//! Generate a detailed serialization benchmark report
+//! Comprehensive Benchmark Report
 //!
-//! Run with: cargo run --release --example bench_report
+//! Run with: `cargo run --release --example bench_report`
 //!
-//! Optional arguments:
-//!   cargo run --release --example bench_report -- --sample-size 10000
-//!   cargo run --release --example bench_report -- --iterations 100
+//! This produces a single report comparing all formats on:
+//! - Serialization speed
+//! - Deserialization speed
+//! - Wire size (raw and compressed)
 
-use std::env;
-use std::time::{Duration, Instant};
+use binostr::{capnp, cbor, dannypack, json, proto, EventLoader, NostrEvent};
+use std::time::Instant;
 
-use binostr::sampler::EventSampler;
-use binostr::stats::Format;
-use binostr::{capnp, cbor, dannypack, json, proto, NostrEvent};
+const WARMUP_ITERATIONS: usize = 100;
+const BENCH_ITERATIONS: usize = 1000;
+const EVENT_COUNT: usize = 1000;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = env::args().collect();
-
-    let sample_size = parse_arg(&args, "--sample-size").unwrap_or(1_000);
-    let iterations = parse_arg(&args, "--iterations").unwrap_or(100);
-
-    println!("╔══════════════════════════════════════════════════════════════════╗");
-    println!("║              BINOSTR BENCHMARK REPORT                            ║");
-    println!("╚══════════════════════════════════════════════════════════════════╝");
-    println!();
-
-    println!("Loading {} events from data directory...", sample_size);
-    let mut sampler = EventSampler::from_directory("data", sample_size * 2)?;
-    let events: Vec<NostrEvent> = sampler
-        .random_sample(sample_size)
-        .into_iter()
-        .cloned()
-        .collect();
-
-    println!(
-        "Benchmarking {} events × {} iterations...",
-        events.len(),
-        iterations
-    );
-    println!();
-
-    // Warmup
-    for event in events.iter().take(10) {
-        let _ = json::serialize(event);
-        let _ = dannypack::serialize(event);
-    }
-
-    // Benchmark serialization
-    let ser_results = benchmark_serialize(&events, iterations);
-
-    // Pre-serialize for deserialization benchmarks
-    let json_data: Vec<_> = events.iter().map(json::serialize).collect();
-    let cbor_schemaless_data: Vec<_> = events.iter().map(cbor::schemaless::serialize).collect();
-    let cbor_packed_data: Vec<_> = events.iter().map(cbor::packed::serialize).collect();
-    let cbor_intkey_data: Vec<_> = events.iter().map(cbor::intkey::serialize).collect();
-    let proto_string_data: Vec<_> = events.iter().map(proto::string::serialize).collect();
-    let proto_binary_data: Vec<_> = events.iter().map(proto::binary::serialize).collect();
-    let capnp_data: Vec<_> = events.iter().map(capnp::serialize_event).collect();
-    let capnp_packed_data: Vec<_> = events.iter().map(capnp::serialize_event_packed).collect();
-    let dannypack_data: Vec<_> = events.iter().map(dannypack::serialize).collect();
-
-    // Benchmark deserialization
-    let deser_results = benchmark_deserialize(
-        &json_data,
-        &cbor_schemaless_data,
-        &cbor_packed_data,
-        &cbor_intkey_data,
-        &proto_string_data,
-        &proto_binary_data,
-        &capnp_data,
-        &capnp_packed_data,
-        &dannypack_data,
-        iterations,
-    );
-
-    // Print results
-    print_serialize_results(&ser_results, events.len());
-    println!();
-    print_deserialize_results(&deser_results, events.len());
-    println!();
-
-    // Summary
-    print_summary(&ser_results, &deser_results, events.len());
-
-    Ok(())
+#[derive(Clone)]
+struct FormatResult {
+    name: &'static str,
+    short_name: &'static str,
+    serialize_ns: u64,
+    deserialize_ns: u64,
+    avg_size: usize,
+    total_size: usize,
+    gzip_size: usize,
+    zstd_size: usize,
 }
 
-struct BenchResult {
-    format: Format,
-    total_time: Duration,
-    min_time: Duration,
-    max_time: Duration,
-}
-
-fn benchmark_serialize(events: &[NostrEvent], iterations: usize) -> Vec<BenchResult> {
-    let formats: Vec<(Format, Box<dyn Fn(&NostrEvent) -> Vec<u8>>)> = vec![
-        (Format::Json, Box::new(|e| json::serialize(e))),
-        (
-            Format::CborSchemaless,
-            Box::new(|e| cbor::schemaless::serialize(e)),
-        ),
-        (Format::CborPacked, Box::new(|e| cbor::packed::serialize(e))),
-        (Format::CborIntKey, Box::new(|e| cbor::intkey::serialize(e))),
-        (
-            Format::ProtoString,
-            Box::new(|e| proto::string::serialize(e)),
-        ),
-        (
-            Format::ProtoBinary,
-            Box::new(|e| proto::binary::serialize(e)),
-        ),
-        (Format::CapnProto, Box::new(|e| capnp::serialize_event(e))),
-        (
-            Format::CapnProtoPacked,
-            Box::new(|e| capnp::serialize_event_packed(e)),
-        ),
-        (Format::DannyPack, Box::new(|e| dannypack::serialize(e))),
-    ];
-
-    let mut results = Vec::new();
-
-    for (format, serialize_fn) in &formats {
-        let mut total = Duration::ZERO;
-        let mut min = Duration::MAX;
-        let mut max = Duration::ZERO;
-
-        for _ in 0..iterations {
-            let start = Instant::now();
-            for event in events {
-                std::hint::black_box(serialize_fn(event));
+fn load_events() -> Vec<NostrEvent> {
+    match EventLoader::open("data/sample.pb.gz") {
+        Ok(loader) => {
+            let events = loader.load_limited(EVENT_COUNT).unwrap_or_default();
+            if events.is_empty() {
+                eprintln!("Warning: No events loaded from data file");
             }
-            let elapsed = start.elapsed();
-            total += elapsed;
-            min = min.min(elapsed);
-            max = max.max(elapsed);
+            events
         }
-
-        results.push(BenchResult {
-            format: *format,
-            total_time: total,
-            min_time: min,
-            max_time: max,
-        });
+        Err(e) => {
+            eprintln!("Error loading events: {}", e);
+            eprintln!("Please ensure data/sample.pb.gz exists");
+            std::process::exit(1);
+        }
     }
-
-    // Sort by total time (fastest first)
-    results.sort_by_key(|r| r.total_time);
-    results
 }
 
-fn benchmark_deserialize(
-    json_data: &[Vec<u8>],
-    cbor_schemaless_data: &[Vec<u8>],
-    cbor_packed_data: &[Vec<u8>],
-    cbor_intkey_data: &[Vec<u8>],
-    proto_string_data: &[Vec<u8>],
-    proto_binary_data: &[Vec<u8>],
-    capnp_data: &[Vec<u8>],
-    capnp_packed_data: &[Vec<u8>],
-    dannypack_data: &[Vec<u8>],
-    iterations: usize,
-) -> Vec<BenchResult> {
+/// Measure time for a closure, returning nanoseconds per iteration
+fn bench<F: FnMut()>(mut f: F, iterations: usize) -> u64 {
+    // Warmup
+    for _ in 0..WARMUP_ITERATIONS {
+        f();
+    }
+
+    // Measure
+    let start = Instant::now();
+    for _ in 0..iterations {
+        f();
+    }
+    let elapsed = start.elapsed();
+
+    elapsed.as_nanos() as u64 / iterations as u64
+}
+
+fn format_ns(ns: u64) -> String {
+    if ns >= 1_000_000 {
+        format!("{:.2} ms", ns as f64 / 1_000_000.0)
+    } else if ns >= 1_000 {
+        format!("{:.2} µs", ns as f64 / 1_000.0)
+    } else {
+        format!("{} ns", ns)
+    }
+}
+
+fn format_size(bytes: usize) -> String {
+    if bytes >= 1_000_000 {
+        format!("{:.2} MB", bytes as f64 / 1_000_000.0)
+    } else if bytes >= 1_000 {
+        format!("{:.2} KB", bytes as f64 / 1_000.0)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+fn format_throughput(ns_per_batch: u64, event_count: usize) -> String {
+    let events_per_sec = (event_count as f64 / ns_per_batch as f64) * 1_000_000_000.0;
+    if events_per_sec >= 1_000_000.0 {
+        format!("{:.2}M/s", events_per_sec / 1_000_000.0)
+    } else if events_per_sec >= 1_000.0 {
+        format!("{:.1}K/s", events_per_sec / 1_000.0)
+    } else {
+        format!("{:.0}/s", events_per_sec)
+    }
+}
+
+fn measure_format<S, D>(
+    name: &'static str,
+    short_name: &'static str,
+    events: &[NostrEvent],
+    serialize: S,
+    deserialize: D,
+) -> FormatResult
+where
+    S: Fn(&NostrEvent) -> Vec<u8>,
+    D: Fn(&[u8]) -> NostrEvent,
+{
+    // Pre-serialize for deserialization benchmark
+    let serialized: Vec<Vec<u8>> = events.iter().map(&serialize).collect();
+
+    // Measure serialization
+    let serialize_ns = bench(
+        || {
+            for event in events {
+                std::hint::black_box(serialize(event));
+            }
+        },
+        BENCH_ITERATIONS,
+    );
+
+    // Measure deserialization
+    let deserialize_ns = bench(
+        || {
+            for data in &serialized {
+                std::hint::black_box(deserialize(data));
+            }
+        },
+        BENCH_ITERATIONS,
+    );
+
+    // Calculate sizes
+    let total_size: usize = serialized.iter().map(|s| s.len()).sum();
+    let avg_size = total_size / events.len();
+
+    // Concatenate all data for compression test
+    let all_data: Vec<u8> = serialized.iter().flat_map(|s| s.iter().copied()).collect();
+    let gzip_size = {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::new(6));
+        encoder.write_all(&all_data).unwrap();
+        encoder.finish().unwrap().len()
+    };
+    let zstd_size = zstd::encode_all(all_data.as_slice(), 3).unwrap().len();
+
+    FormatResult {
+        name,
+        short_name,
+        serialize_ns,
+        deserialize_ns,
+        avg_size,
+        total_size,
+        gzip_size,
+        zstd_size,
+    }
+}
+
+fn main() {
+    println!();
+    println!("╔══════════════════════════════════════════════════════════════════════════════╗");
+    println!("║                    BINOSTR COMPREHENSIVE BENCHMARK REPORT                    ║");
+    println!("╚══════════════════════════════════════════════════════════════════════════════╝");
+    println!();
+
+    // Load events
+    print!("Loading events... ");
+    let events = load_events();
+    println!("✓ {} events loaded", events.len());
+
+    println!("Running benchmarks ({} iterations each)...", BENCH_ITERATIONS);
+    println!();
+
+    // Measure all formats
     let mut results = Vec::new();
 
-    // JSON
-    results.push(bench_deser(Format::Json, iterations, || {
-        for data in json_data {
-            std::hint::black_box(json::deserialize(data).unwrap());
-        }
-    }));
+    print!("  JSON...           ");
+    std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    results.push(measure_format(
+        "JSON",
+        "json",
+        &events,
+        |e| json::serialize(e),
+        |d| json::deserialize(d).unwrap(),
+    ));
+    println!("✓");
 
-    // CBOR Schemaless
-    results.push(bench_deser(Format::CborSchemaless, iterations, || {
-        for data in cbor_schemaless_data {
-            std::hint::black_box(cbor::schemaless::deserialize(data).unwrap());
-        }
-    }));
+    print!("  CBOR Schemaless... ");
+    std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    results.push(measure_format(
+        "CBOR Schemaless",
+        "cbor_schema",
+        &events,
+        |e| cbor::schemaless::serialize(e),
+        |d| cbor::schemaless::deserialize(d).unwrap(),
+    ));
+    println!("✓");
 
-    // CBOR Packed
-    results.push(bench_deser(Format::CborPacked, iterations, || {
-        for data in cbor_packed_data {
-            std::hint::black_box(cbor::packed::deserialize(data).unwrap());
-        }
-    }));
+    print!("  CBOR Packed...    ");
+    std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    results.push(measure_format(
+        "CBOR Packed",
+        "cbor_packed",
+        &events,
+        |e| cbor::packed::serialize(e),
+        |d| cbor::packed::deserialize(d).unwrap(),
+    ));
+    println!("✓");
 
-    // CBOR IntKey
-    results.push(bench_deser(Format::CborIntKey, iterations, || {
-        for data in cbor_intkey_data {
-            std::hint::black_box(cbor::intkey::deserialize(data).unwrap());
-        }
-    }));
+    print!("  CBOR IntKey...    ");
+    std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    results.push(measure_format(
+        "CBOR IntKey",
+        "cbor_intkey",
+        &events,
+        |e| cbor::intkey::serialize(e),
+        |d| cbor::intkey::deserialize(d).unwrap(),
+    ));
+    println!("✓");
 
-    // Proto String
-    results.push(bench_deser(Format::ProtoString, iterations, || {
-        for data in proto_string_data {
-            std::hint::black_box(proto::string::deserialize(data).unwrap());
-        }
-    }));
+    print!("  Proto String...   ");
+    std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    results.push(measure_format(
+        "Proto String",
+        "proto_str",
+        &events,
+        |e| proto::string::serialize(e),
+        |d| proto::string::deserialize(d).unwrap(),
+    ));
+    println!("✓");
 
-    // Proto Binary
-    results.push(bench_deser(Format::ProtoBinary, iterations, || {
-        for data in proto_binary_data {
-            std::hint::black_box(proto::binary::deserialize(data).unwrap());
-        }
-    }));
+    print!("  Proto Binary...   ");
+    std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    results.push(measure_format(
+        "Proto Binary",
+        "proto_bin",
+        &events,
+        |e| proto::binary::serialize(e),
+        |d| proto::binary::deserialize(d).unwrap(),
+    ));
+    println!("✓");
 
-    // Cap'n Proto
-    results.push(bench_deser(Format::CapnProto, iterations, || {
-        for data in capnp_data {
-            std::hint::black_box(capnp::deserialize_event(data).unwrap());
-        }
-    }));
+    print!("  Cap'n Proto...    ");
+    std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    results.push(measure_format(
+        "Cap'n Proto",
+        "capnp",
+        &events,
+        |e| capnp::serialize_event(e),
+        |d| capnp::deserialize_event(d).unwrap(),
+    ));
+    println!("✓");
 
-    // Cap'n Proto Packed
-    results.push(bench_deser(Format::CapnProtoPacked, iterations, || {
-        for data in capnp_packed_data {
-            std::hint::black_box(capnp::deserialize_event_packed(data).unwrap());
-        }
-    }));
+    print!("  Cap'n Packed...   ");
+    std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    results.push(measure_format(
+        "Cap'n Packed",
+        "capnp_pk",
+        &events,
+        |e| capnp::serialize_event_packed(e),
+        |d| capnp::deserialize_event_packed(d).unwrap(),
+    ));
+    println!("✓");
 
-    // DannyPack
-    results.push(bench_deser(Format::DannyPack, iterations, || {
-        for data in dannypack_data {
-            std::hint::black_box(dannypack::deserialize(data).unwrap());
-        }
-    }));
+    print!("  DannyPack...      ");
+    std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    results.push(measure_format(
+        "DannyPack",
+        "dannypack",
+        &events,
+        |e| dannypack::serialize(e),
+        |d| dannypack::deserialize(d).unwrap(),
+    ));
+    println!("✓");
 
-    // Sort by total time (fastest first)
-    results.sort_by_key(|r| r.total_time);
-    results
-}
+    println!();
 
-fn bench_deser<F: FnMut()>(format: Format, iterations: usize, mut f: F) -> BenchResult {
-    let mut total = Duration::ZERO;
-    let mut min = Duration::MAX;
-    let mut max = Duration::ZERO;
+    // Find winners for highlighting
+    let json_result = results.iter().find(|r| r.short_name == "json").unwrap();
+    let json_size = json_result.total_size;
 
-    for _ in 0..iterations {
-        let start = Instant::now();
-        f();
-        let elapsed = start.elapsed();
-        total += elapsed;
-        min = min.min(elapsed);
-        max = max.max(elapsed);
-    }
+    let fastest_serialize = results.iter().map(|r| r.serialize_ns).min().unwrap();
+    let fastest_deserialize = results.iter().map(|r| r.deserialize_ns).min().unwrap();
+    let smallest_raw = results.iter().map(|r| r.total_size).min().unwrap();
+    let smallest_gzip = results.iter().map(|r| r.gzip_size).min().unwrap();
+    let smallest_zstd = results.iter().map(|r| r.zstd_size).min().unwrap();
 
-    BenchResult {
-        format,
-        total_time: total,
-        min_time: min,
-        max_time: max,
-    }
-}
+    // Print comprehensive table
+    // Note: Using * for winners instead of emoji to maintain alignment
+    println!();
+    println!("┌─────────────────┬──────────────────────────────────┬──────────────────────────────────┬──────────────────────────────────────────────┐");
+    println!("│                 │          SERIALIZATION           │         DESERIALIZATION          │                     SIZE                     │");
+    println!("│     FORMAT      ├────────────┬─────────────────────┼────────────┬─────────────────────┼──────────┬─────────┬──────────┬─────────────┤");
+    println!("│                 │    Time    │     Throughput      │    Time    │     Throughput      │   Raw    │ vs JSON │  +gzip   │   +zstd     │");
+    println!("├─────────────────┼────────────┼─────────────────────┼────────────┼─────────────────────┼──────────┼─────────┼──────────┼─────────────┤");
 
-fn print_serialize_results(results: &[BenchResult], event_count: usize) {
-    let fastest = results.first().map(|r| r.total_time).unwrap_or_default();
+    for r in &results {
+        let ser_best = if r.serialize_ns == fastest_serialize { "*" } else { " " };
+        let deser_best = if r.deserialize_ns == fastest_deserialize { "*" } else { " " };
+        let raw_best = if r.total_size == smallest_raw { "*" } else { " " };
+        let gzip_best = if r.gzip_size == smallest_gzip { "*" } else { " " };
+        let zstd_best = if r.zstd_size == smallest_zstd { "*" } else { " " };
 
-    println!("📤 SERIALIZATION");
-    println!("┌──────────────────┬────────────┬────────────┬────────────┬─────────────┬─────────┐");
-    println!("│ Format           │ Total Time │  Min/iter  │  Max/iter  │  Per Event  │ vs Best │");
-    println!("├──────────────────┼────────────┼────────────┼────────────┼─────────────┼─────────┤");
-
-    for result in results {
-        let per_event = result.total_time.as_nanos() as f64
-            / (event_count as f64 * results.len() as f64 / results.len() as f64)
-            / 100.0; // divide by iterations
-        let vs_best = 100.0 * result.total_time.as_nanos() as f64 / fastest.as_nanos() as f64;
+        let size_vs_json = 100.0 * r.total_size as f64 / json_size as f64;
 
         println!(
-            "│ {:16} │ {:>10} │ {:>10} │ {:>10} │ {:>9.0} ns │ {:>6.0}% │",
-            result.format.name(),
-            format_duration(result.total_time),
-            format_duration(result.min_time),
-            format_duration(result.max_time),
-            per_event,
-            vs_best
+            "│ {:<15} │ {:>9}{} │ {:>18} │ {:>9}{} │ {:>18} │ {:>7}{} │ {:>6.1}% │ {:>7}{} │ {:>10}{} │",
+            r.name,
+            format_ns(r.serialize_ns),
+            ser_best,
+            format_throughput(r.serialize_ns, events.len()),
+            format_ns(r.deserialize_ns),
+            deser_best,
+            format_throughput(r.deserialize_ns, events.len()),
+            format_size(r.avg_size),
+            raw_best,
+            size_vs_json,
+            format_size(r.gzip_size),
+            gzip_best,
+            format_size(r.zstd_size),
+            zstd_best,
         );
     }
 
-    println!("└──────────────────┴────────────┴────────────┴────────────┴─────────────┴─────────┘");
-}
+    println!("└─────────────────┴────────────┴─────────────────────┴────────────┴─────────────────────┴──────────┴─────────┴──────────┴─────────────┘");
+    println!();
+    println!("  * = best in category");
+    println!();
 
-fn print_deserialize_results(results: &[BenchResult], event_count: usize) {
-    let fastest = results.first().map(|r| r.total_time).unwrap_or_default();
+    // Print rankings
+    println!("┌──────────────────────────────────────────────────────────────────────────────┐");
+    println!("│                              RANKINGS BY METRIC                              │");
+    println!("└──────────────────────────────────────────────────────────────────────────────┘");
+    println!();
 
-    println!("📥 DESERIALIZATION");
-    println!("┌──────────────────┬────────────┬────────────┬────────────┬─────────────┬─────────┐");
-    println!("│ Format           │ Total Time │  Min/iter  │  Max/iter  │  Per Event  │ vs Best │");
-    println!("├──────────────────┼────────────┼────────────┼────────────┼─────────────┼─────────┤");
-
-    for result in results {
-        let per_event = result.total_time.as_nanos() as f64
-            / (event_count as f64 * results.len() as f64 / results.len() as f64)
-            / 100.0;
-        let vs_best = 100.0 * result.total_time.as_nanos() as f64 / fastest.as_nanos() as f64;
-
+    // Sort and print serialization ranking
+    let mut ser_sorted = results.clone();
+    ser_sorted.sort_by_key(|r| r.serialize_ns);
+    println!("  📝 SERIALIZATION SPEED (fastest first):");
+    for (i, r) in ser_sorted.iter().enumerate() {
+        let speedup = json_result.serialize_ns as f64 / r.serialize_ns as f64;
+        let medal = match i {
+            0 => "🥇",
+            1 => "🥈",
+            2 => "🥉",
+            _ => "  ",
+        };
         println!(
-            "│ {:16} │ {:>10} │ {:>10} │ {:>10} │ {:>9.0} ns │ {:>6.0}% │",
-            result.format.name(),
-            format_duration(result.total_time),
-            format_duration(result.min_time),
-            format_duration(result.max_time),
-            per_event,
-            vs_best
+            "     {} {:2}. {:<15} {:>10} ({:>15}) {:.1}x vs JSON",
+            medal,
+            i + 1,
+            r.name,
+            format_ns(r.serialize_ns),
+            format_throughput(r.serialize_ns, events.len()),
+            speedup
         );
     }
+    println!();
 
-    println!("└──────────────────┴────────────┴────────────┴────────────┴─────────────┴─────────┘");
-}
+    // Sort and print deserialization ranking
+    let mut deser_sorted = results.clone();
+    deser_sorted.sort_by_key(|r| r.deserialize_ns);
+    println!("  📖 DESERIALIZATION SPEED (fastest first):");
+    for (i, r) in deser_sorted.iter().enumerate() {
+        let speedup = json_result.deserialize_ns as f64 / r.deserialize_ns as f64;
+        let medal = match i {
+            0 => "🥇",
+            1 => "🥈",
+            2 => "🥉",
+            _ => "  ",
+        };
+        println!(
+            "     {} {:2}. {:<15} {:>10} ({:>15}) {:.1}x vs JSON",
+            medal,
+            i + 1,
+            r.name,
+            format_ns(r.deserialize_ns),
+            format_throughput(r.deserialize_ns, events.len()),
+            speedup
+        );
+    }
+    println!();
 
-fn print_summary(ser_results: &[BenchResult], deser_results: &[BenchResult], event_count: usize) {
-    let ser_best = ser_results.first().unwrap();
-    let deser_best = deser_results.first().unwrap();
+    // Sort and print size ranking
+    let mut size_sorted = results.clone();
+    size_sorted.sort_by_key(|r| r.total_size);
+    println!("  📦 RAW SIZE (smallest first):");
+    for (i, r) in size_sorted.iter().enumerate() {
+        let pct = 100.0 * r.total_size as f64 / json_size as f64;
+        let savings = 100.0 - pct;
+        let medal = match i {
+            0 => "🥇",
+            1 => "🥈",
+            2 => "🥉",
+            _ => "  ",
+        };
+        println!(
+            "     {} {:2}. {:<15} {:>10} ({:>5.1}% of JSON, {:>5.1}% savings)",
+            medal,
+            i + 1,
+            r.name,
+            format_size(r.avg_size),
+            pct,
+            savings
+        );
+    }
+    println!();
 
-    // Find JSON for comparison
-    let json_ser = ser_results
+    // Sort and print compressed size ranking
+    let mut zstd_sorted = results.clone();
+    zstd_sorted.sort_by_key(|r| r.zstd_size);
+    println!("  🗜️  COMPRESSED SIZE (zstd, smallest first):");
+    let json_zstd = json_result.zstd_size;
+    for (i, r) in zstd_sorted.iter().enumerate() {
+        let pct = 100.0 * r.zstd_size as f64 / json_zstd as f64;
+        let medal = match i {
+            0 => "🥇",
+            1 => "🥈",
+            2 => "🥉",
+            _ => "  ",
+        };
+        println!(
+            "     {} {:2}. {:<15} {:>10} ({:>5.1}% of JSON compressed)",
+            medal,
+            i + 1,
+            r.name,
+            format_size(r.zstd_size),
+            pct
+        );
+    }
+    println!();
+
+    // Print summary recommendation
+    println!("┌──────────────────────────────────────────────────────────────────────────────┐");
+    println!("│                               RECOMMENDATIONS                                │");
+    println!("└──────────────────────────────────────────────────────────────────────────────┘");
+    println!();
+
+    // Find best overall (weighted score)
+    let best_speed = ser_sorted[0].name;
+    let best_size = size_sorted[0].name;
+    let best_deser = deser_sorted[0].name;
+
+    println!("  • Fastest serialization:    {}", best_speed);
+    println!("  • Fastest deserialization:  {}", best_deser);
+    println!("  • Smallest wire size:       {}", best_size);
+    println!();
+
+    // Calculate a balanced score (normalize each metric, lower is better)
+    let mut balanced: Vec<(&str, f64)> = results
         .iter()
-        .find(|r| r.format == Format::Json)
-        .unwrap();
-    let json_deser = deser_results
-        .iter()
-        .find(|r| r.format == Format::Json)
-        .unwrap();
-
-    let ser_speedup = json_ser.total_time.as_nanos() as f64 / ser_best.total_time.as_nanos() as f64;
-    let deser_speedup =
-        json_deser.total_time.as_nanos() as f64 / deser_best.total_time.as_nanos() as f64;
-
-    println!("📊 SUMMARY");
-    println!("┌────────────────────────────────────────────────────────────────────┐");
-    println!(
-        "│ Fastest Serialize:   {:16} ({:.1}x faster than JSON)     │",
-        ser_best.format.name(),
-        ser_speedup
-    );
-    println!(
-        "│ Fastest Deserialize: {:16} ({:.1}x faster than JSON)     │",
-        deser_best.format.name(),
-        deser_speedup
-    );
-    println!("├────────────────────────────────────────────────────────────────────┤");
-
-    // Combined throughput (serialize + deserialize)
-    println!(
-        "│ Combined Throughput (events/sec @ {} events):                   │",
-        event_count
-    );
-
-    let mut combined: Vec<_> = Format::all()
-        .iter()
-        .filter_map(|&f| {
-            let ser = ser_results.iter().find(|r| r.format == f)?;
-            let deser = deser_results.iter().find(|r| r.format == f)?;
-            let total_ns = ser.total_time.as_nanos() + deser.total_time.as_nanos();
-            let events_per_sec = (event_count as f64 * 100.0) / (total_ns as f64 / 1_000_000_000.0);
-            Some((f, events_per_sec))
+        .map(|r| {
+            let ser_score = r.serialize_ns as f64 / fastest_serialize as f64;
+            let deser_score = r.deserialize_ns as f64 / fastest_deserialize as f64;
+            let size_score = r.total_size as f64 / smallest_raw as f64;
+            // Weight: 30% serialize, 30% deserialize, 40% size
+            let total = 0.3 * ser_score + 0.3 * deser_score + 0.4 * size_score;
+            (r.name, total)
         })
         .collect();
+    balanced.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
-    combined.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-
-    for (format, throughput) in &combined {
-        println!(
-            "│   {:16}: {:>12.0} events/sec                         │",
-            format.name(),
-            throughput
-        );
+    println!("  🎯 BALANCED RECOMMENDATION (30% ser + 30% deser + 40% size):");
+    for (i, (name, score)) in balanced.iter().take(3).enumerate() {
+        let medal = match i {
+            0 => "🥇",
+            1 => "🥈",
+            2 => "🥉",
+            _ => "  ",
+        };
+        println!("     {} {:<15} (score: {:.2})", medal, name, score);
     }
+    println!();
 
-    println!("└────────────────────────────────────────────────────────────────────┘");
-}
-
-fn parse_arg<T: std::str::FromStr>(args: &[String], name: &str) -> Option<T> {
-    args.iter()
-        .position(|a| a == name)
-        .and_then(|i| args.get(i + 1))
-        .and_then(|s| s.parse().ok())
-}
-
-fn format_duration(d: Duration) -> String {
-    let nanos = d.as_nanos();
-    if nanos >= 1_000_000_000 {
-        format!("{:.2} s", d.as_secs_f64())
-    } else if nanos >= 1_000_000 {
-        format!("{:.2} ms", nanos as f64 / 1_000_000.0)
-    } else if nanos >= 1_000 {
-        format!("{:.2} µs", nanos as f64 / 1_000.0)
-    } else {
-        format!("{} ns", nanos)
-    }
+    println!("  📋 For a Nostr NIP recommendation:");
+    println!("     • Best for bandwidth-constrained: {}", best_size);
+    println!("     • Best for CPU-constrained:       {}", best_speed);
+    println!("     • Best balanced:                  {}", balanced[0].0);
+    println!();
 }

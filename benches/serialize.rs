@@ -129,6 +129,10 @@ fn bench_serialize_batch(c: &mut Criterion) {
     group.finish();
 }
 
+/// Throughput benchmark measuring events/second (fair comparison across formats)
+///
+/// Uses Throughput::Elements to measure events processed per second,
+/// which provides fair comparison regardless of output size.
 fn bench_serialize_throughput(c: &mut Criterion) {
     let events = common::load_sample(1000);
 
@@ -139,9 +143,9 @@ fn bench_serialize_throughput(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("serialize_throughput");
 
-    // Calculate total bytes for throughput measurement
-    let json_bytes: usize = events.iter().map(|e| json::serialize(e).len()).sum();
-    group.throughput(Throughput::Bytes(json_bytes as u64));
+    // Use events/sec for fair comparison across formats
+    let event_count = events.len() as u64;
+    group.throughput(Throughput::Elements(event_count));
 
     group.bench_function("json", |b| {
         b.iter(|| {
@@ -220,7 +224,7 @@ fn bench_serialize_throughput(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = common::fast_criterion();
+    config = common::auto_criterion();
     targets = bench_serialize_single, bench_serialize_batch, bench_serialize_throughput
 }
 criterion_main!(benches);

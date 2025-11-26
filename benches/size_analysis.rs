@@ -152,7 +152,7 @@ fn size_analysis(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = common::fast_criterion();
+    config = common::auto_criterion();
     targets = size_analysis
 }
 criterion_main!(benches);
