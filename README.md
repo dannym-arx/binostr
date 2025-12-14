@@ -2,7 +2,7 @@
 
 A benchmarking library for comparing binary serialization formats for [Nostr](https://github.com/nostr-protocol/nips) events.
 
-This project evaluates **JSON**, **CBOR**, **Protocol Buffers**, and **Cap'n Proto** to inform potential NIPs for binary client-relay communication.
+This project evaluates **JSON**, **CBOR**, **Protocol Buffers**, **Cap'n Proto**, **DannyPack**, and **Notepack** to inform potential NIPs for binary client-relay communication.
 
 ## Key Findings
 
@@ -87,6 +87,16 @@ Custom binary format designed specifically for Nostr events:
 - Safe variant (`deserialize_safe`) available for untrusted input
 
 See `src/dannypack.rs` for detailed wire format documentation.
+
+### Notepack
+Compact binary format designed specifically for Nostr notes:
+- Varint encoding for integers (LEB128-style)
+- Hex strings stored as raw bytes (32-byte pubkeys stored as 32 bytes, not 64 hex chars)
+- Streaming parser for memory-efficient processing
+- Base64-prefixed string format (`notepack_...`) for easy transport
+- Zero-allocation parsing via lazy tag iterators
+
+See [notepack on crates.io](https://crates.io/crates/notepack) for details.
 
 ## Usage
 
@@ -225,6 +235,7 @@ binostr/
 │   ├── proto.rs        # Protobuf variants
 │   ├── capnp.rs        # Cap'n Proto (with zero-copy field access)
 │   ├── dannypack.rs    # Custom binary format (safe & unsafe variants)
+│   ├── notepack.rs     # Notepack format (compact with streaming parser)
 │   └── stats.rs        # Analysis utilities & compression helpers
 ├── benches/
 │   ├── serialize.rs    # Serialization speed benchmarks

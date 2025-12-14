@@ -4,7 +4,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughpu
 
 mod common;
 
-use binostr::{capnp, cbor, json, proto, NostrEvent};
+use binostr::{capnp, cbor, json, notepack, proto, NostrEvent};
 
 /// Benchmark a specific event kind
 fn bench_kind(c: &mut Criterion, kind: u16, name: &str) {
@@ -52,11 +52,20 @@ fn bench_kind(c: &mut Criterion, kind: u16, name: &str) {
         })
     });
 
+    group.bench_function("serialize/notepack", |b| {
+        b.iter(|| {
+            for event in &events {
+                black_box(notepack::serialize(event));
+            }
+        })
+    });
+
     // Pre-serialize for deserialization benchmarks
     let json_data: Vec<_> = events.iter().map(json::serialize).collect();
     let cbor_data: Vec<_> = events.iter().map(cbor::packed::serialize).collect();
     let proto_data: Vec<_> = events.iter().map(proto::binary::serialize).collect();
     let capnp_data: Vec<_> = events.iter().map(capnp::serialize_event).collect();
+    let notepack_data: Vec<_> = events.iter().map(notepack::serialize).collect();
 
     // Deserialize benchmarks
     group.bench_function("deserialize/json", |b| {
@@ -91,6 +100,14 @@ fn bench_kind(c: &mut Criterion, kind: u16, name: &str) {
         })
     });
 
+    group.bench_function("deserialize/notepack", |b| {
+        b.iter(|| {
+            for data in &notepack_data {
+                black_box(notepack::deserialize(data).unwrap());
+            }
+        })
+    });
+
     group.finish();
 
     // Print size comparison for this kind
@@ -109,6 +126,7 @@ fn print_size_comparison(events: &[NostrEvent], kind: u16, name: &str) {
     let mut proto_string_total = 0;
     let mut proto_binary_total = 0;
     let mut capnp_total = 0;
+    let mut notepack_total = 0;
 
     for event in events {
         json_total += json::serialize(event).len();
@@ -118,6 +136,7 @@ fn print_size_comparison(events: &[NostrEvent], kind: u16, name: &str) {
         proto_string_total += proto::string::serialize(event).len();
         proto_binary_total += proto::binary::serialize(event).len();
         capnp_total += capnp::serialize_event(event).len();
+        notepack_total += notepack::serialize(event).len();
     }
 
     let n = events.len();
@@ -153,6 +172,11 @@ fn print_size_comparison(events: &[NostrEvent], kind: u16, name: &str) {
         "  Cap'n Proto:    {:>6} bytes ({:>5.1}%)",
         capnp_total / n,
         100.0 * capnp_total as f64 / json_total as f64
+    );
+    println!(
+        "  Notepack:       {:>6} bytes ({:>5.1}%)",
+        notepack_total / n,
+        100.0 * notepack_total as f64 / json_total as f64
     );
 }
 

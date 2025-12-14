@@ -25,6 +25,9 @@ capnp = "0.20"
 flate2 = "1.0"
 zstd = "0.13"
 
+# Notepack
+notepack = "0.3"
+
 # Utilities
 rand = "0.8"
 hex = "0.4"

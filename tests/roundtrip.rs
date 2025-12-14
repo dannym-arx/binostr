@@ -3,7 +3,7 @@
 //! Tests that all serialization formats correctly roundtrip real Nostr events
 //! without data loss or corruption.
 
-use binostr::{capnp, cbor, dannypack, json, proto, EventLoader, NostrEvent};
+use binostr::{capnp, cbor, dannypack, json, notepack, proto, EventLoader, NostrEvent};
 
 /// Load real events from the sample data file
 fn load_real_events(count: usize) -> Vec<NostrEvent> {
@@ -563,6 +563,50 @@ mod dannypack_roundtrip {
     }
 }
 
+// Notepack tests
+mod notepack_roundtrip {
+    use super::*;
+
+    #[test]
+    fn roundtrip_edge_cases() {
+        let events = generate_edge_case_events();
+        for (i, event) in events.iter().enumerate() {
+            let serialized = notepack::serialize(event);
+            let deserialized = notepack::deserialize(&serialized)
+                .unwrap_or_else(|e| panic!("Failed to deserialize edge case {}: {}", i, e));
+            assert_eq!(event, &deserialized, "Edge case {} roundtrip failed", i);
+        }
+    }
+
+    #[test]
+    fn roundtrip_real_events() {
+        let events = load_real_events(100);
+        if events.is_empty() {
+            eprintln!("Skipping real events test - no sample data available");
+            return;
+        }
+
+        for (i, event) in events.iter().enumerate() {
+            let serialized = notepack::serialize(event);
+            let deserialized = notepack::deserialize(&serialized)
+                .unwrap_or_else(|e| panic!("Failed to deserialize real event {}: {}", i, e));
+            assert_eq!(
+                event, &deserialized,
+                "Real event {} roundtrip failed (kind={})",
+                i, event.kind
+            );
+        }
+    }
+
+    #[test]
+    fn batch_roundtrip() {
+        let events = generate_edge_case_events();
+        let serialized = notepack::serialize_batch(&events);
+        let deserialized = notepack::deserialize_batch(&serialized).unwrap();
+        assert_eq!(events, deserialized);
+    }
+}
+
 // Cross-format consistency tests
 mod cross_format {
     use super::*;
@@ -583,6 +627,7 @@ mod cross_format {
             let capnp_bytes = capnp::serialize_event(original);
             let capnp_packed_bytes = capnp::serialize_event_packed(original);
             let dannypack_bytes = dannypack::serialize(original);
+            let notepack_bytes = notepack::serialize(original);
 
             // Deserialize each
             let from_json = json::deserialize(&json_bytes).unwrap();
@@ -594,6 +639,7 @@ mod cross_format {
             let from_capnp = capnp::deserialize_event(&capnp_bytes).unwrap();
             let from_capnp_packed = capnp::deserialize_event_packed(&capnp_packed_bytes).unwrap();
             let from_dannypack = dannypack::deserialize(&dannypack_bytes).unwrap();
+            let from_notepack = notepack::deserialize(&notepack_bytes).unwrap();
 
             // All should equal original
             assert_eq!(original, &from_json, "JSON mismatch at event {}", i);
@@ -605,6 +651,7 @@ mod cross_format {
             assert_eq!(original, &from_capnp, "Cap'n Proto mismatch at event {}", i);
             assert_eq!(original, &from_capnp_packed, "Cap'n Proto Packed mismatch at event {}", i);
             assert_eq!(original, &from_dannypack, "DannyPack mismatch at event {}", i);
+            assert_eq!(original, &from_notepack, "Notepack mismatch at event {}", i);
         }
     }
 }

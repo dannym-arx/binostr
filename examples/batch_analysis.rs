@@ -114,7 +114,7 @@ fn main() {
     );
     println!("{}", "─".repeat(62));
 
-    for &format in &[Format::Json, Format::CborPacked, Format::ProtoBinary, Format::DannyPack] {
+    for &format in &[Format::Json, Format::CborPacked, Format::ProtoBinary, Format::DannyPack, Format::Notepack] {
         let individual_total: usize = batch
             .iter()
             .map(|e| binostr::stats::serialize(e, format).len())

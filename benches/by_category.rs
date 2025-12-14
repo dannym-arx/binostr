@@ -8,7 +8,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughpu
 mod common;
 
 use binostr::event::{SizeCategory, TagCategory};
-use binostr::{capnp, cbor, dannypack, json, proto, EventSampler, NostrEvent};
+use binostr::{capnp, cbor, dannypack, json, notepack, proto, EventSampler, NostrEvent};
 
 const DATA_DIR: &str = "data";
 const SAMPLE_SIZE: usize = 100;
@@ -105,12 +105,21 @@ fn bench_size_category(c: &mut Criterion, category: SizeCategory, name: &str) {
         })
     });
 
+    group.bench_function("serialize/notepack", |b| {
+        b.iter(|| {
+            for event in &events {
+                black_box(notepack::serialize(event));
+            }
+        })
+    });
+
     // Pre-serialize for deserialization benchmarks
     let json_data: Vec<_> = events.iter().map(json::serialize).collect();
     let cbor_data: Vec<_> = events.iter().map(cbor::packed::serialize).collect();
     let proto_data: Vec<_> = events.iter().map(proto::binary::serialize).collect();
     let capnp_data: Vec<_> = events.iter().map(capnp::serialize_event).collect();
     let dannypack_data: Vec<_> = events.iter().map(dannypack::serialize).collect();
+    let notepack_data: Vec<_> = events.iter().map(notepack::serialize).collect();
 
     // Deserialize benchmarks
     group.bench_function("deserialize/json", |b| {
@@ -149,6 +158,14 @@ fn bench_size_category(c: &mut Criterion, category: SizeCategory, name: &str) {
         b.iter(|| {
             for data in &dannypack_data {
                 black_box(dannypack::deserialize(data).unwrap());
+            }
+        })
+    });
+
+    group.bench_function("deserialize/notepack", |b| {
+        b.iter(|| {
+            for data in &notepack_data {
+                black_box(notepack::deserialize(data).unwrap());
             }
         })
     });
@@ -213,12 +230,21 @@ fn bench_tag_category(c: &mut Criterion, category: TagCategory, name: &str) {
         })
     });
 
+    group.bench_function("serialize/notepack", |b| {
+        b.iter(|| {
+            for event in &events {
+                black_box(notepack::serialize(event));
+            }
+        })
+    });
+
     // Pre-serialize for deserialization benchmarks
     let json_data: Vec<_> = events.iter().map(json::serialize).collect();
     let cbor_data: Vec<_> = events.iter().map(cbor::packed::serialize).collect();
     let proto_data: Vec<_> = events.iter().map(proto::binary::serialize).collect();
     let capnp_data: Vec<_> = events.iter().map(capnp::serialize_event).collect();
     let dannypack_data: Vec<_> = events.iter().map(dannypack::serialize).collect();
+    let notepack_data: Vec<_> = events.iter().map(notepack::serialize).collect();
 
     // Deserialize benchmarks
     group.bench_function("deserialize/json", |b| {
@@ -261,6 +287,14 @@ fn bench_tag_category(c: &mut Criterion, category: TagCategory, name: &str) {
         })
     });
 
+    group.bench_function("deserialize/notepack", |b| {
+        b.iter(|| {
+            for data in &notepack_data {
+                black_box(notepack::deserialize(data).unwrap());
+            }
+        })
+    });
+
     group.finish();
 
     // Print size statistics
@@ -279,6 +313,7 @@ fn print_size_stats(events: &[NostrEvent], category: &str) {
     let proto_total: usize = events.iter().map(|e| proto::binary::serialize(e).len()).sum();
     let capnp_total: usize = events.iter().map(|e| capnp::serialize_event(e).len()).sum();
     let dannypack_total: usize = events.iter().map(|e| dannypack::serialize(e).len()).sum();
+    let notepack_total: usize = events.iter().map(|e| notepack::serialize(e).len()).sum();
 
     println!("\n=== {} - {} events ===", category, n);
     println!("Average sizes:");
@@ -302,6 +337,11 @@ fn print_size_stats(events: &[NostrEvent], category: &str) {
         "  DannyPack:    {:>6} bytes ({:>5.1}%)",
         dannypack_total / n,
         100.0 * dannypack_total as f64 / json_total as f64
+    );
+    println!(
+        "  Notepack:     {:>6} bytes ({:>5.1}%)",
+        notepack_total / n,
+        100.0 * notepack_total as f64 / json_total as f64
     );
 }
 

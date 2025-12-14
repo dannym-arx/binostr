@@ -9,6 +9,7 @@ pub mod dannypack;
 pub mod event;
 pub mod json;
 pub mod loader;
+pub mod notepack;
 pub mod proto;
 pub mod sampler;
 pub mod stats;

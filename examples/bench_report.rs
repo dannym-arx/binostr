@@ -7,7 +7,7 @@
 //! - Deserialization speed
 //! - Wire size (raw and compressed)
 
-use binostr::{capnp, cbor, dannypack, json, proto, EventLoader, NostrEvent};
+use binostr::{capnp, cbor, dannypack, json, notepack, proto, EventLoader, NostrEvent};
 use std::time::Instant;
 
 const WARMUP_ITERATIONS: usize = 100;
@@ -267,6 +267,17 @@ fn main() {
         &events,
         |e| dannypack::serialize(e),
         |d| dannypack::deserialize(d).unwrap(),
+    ));
+    println!("✓");
+
+    print!("  Notepack...       ");
+    std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    results.push(measure_format(
+        "Notepack",
+        "notepack",
+        &events,
+        |e| notepack::serialize(e),
+        |d| notepack::deserialize(d).unwrap(),
     ));
     println!("✓");
 

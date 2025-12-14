@@ -9,7 +9,7 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 
 use crate::event::{NostrEvent, SizeCategory, TagCategory};
-use crate::{capnp, cbor, dannypack, json, proto};
+use crate::{capnp, cbor, dannypack, json, notepack, proto};
 
 /// Serialization format identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -24,6 +24,7 @@ pub enum Format {
     CapnProto,
     CapnProtoPacked,
     DannyPack,
+    Notepack,
 }
 
 impl Format {
@@ -39,6 +40,7 @@ impl Format {
             Format::CapnProto,
             Format::CapnProtoPacked,
             Format::DannyPack,
+            Format::Notepack,
         ]
     }
 
@@ -55,6 +57,7 @@ impl Format {
             Format::CapnProto,
             Format::CapnProtoPacked,
             Format::DannyPack,
+            Format::Notepack,
         ]
     }
 
@@ -70,6 +73,7 @@ impl Format {
             Format::CapnProto => "Cap'n Proto",
             Format::CapnProtoPacked => "Cap'n Packed",
             Format::DannyPack => "DannyPack",
+            Format::Notepack => "Notepack",
         }
     }
 
@@ -85,6 +89,7 @@ impl Format {
             Format::CapnProto => "capnp",
             Format::CapnProtoPacked => "capnp_pk",
             Format::DannyPack => "dannypack",
+            Format::Notepack => "notepack",
         }
     }
 }
@@ -102,6 +107,7 @@ pub fn serialize(event: &NostrEvent, format: Format) -> Vec<u8> {
         Format::CapnProto => capnp::serialize_event(event),
         Format::CapnProtoPacked => capnp::serialize_event_packed(event),
         Format::DannyPack => dannypack::serialize(event),
+        Format::Notepack => notepack::serialize(event),
     }
 }
 
@@ -125,6 +131,7 @@ pub fn serialize_batch(events: &[NostrEvent], format: Format) -> Vec<u8> {
         Format::CapnProto => capnp::serialize_batch(events),
         Format::CapnProtoPacked => capnp::serialize_batch_packed(events),
         Format::DannyPack => dannypack::serialize_batch(events),
+        Format::Notepack => notepack::serialize_batch(events),
     }
 }
 
@@ -467,7 +474,7 @@ mod tests {
         let event = sample_event();
         let stats = compute_size_stats(&event);
 
-        assert_eq!(stats.len(), 9);
+        assert_eq!(stats.len(), 10);
 
         // All formats should produce non-zero sizes
         for stat in &stats {

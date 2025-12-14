@@ -4,7 +4,7 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 
 mod common;
 
-use binostr::{capnp, cbor, dannypack, json, proto};
+use binostr::{capnp, cbor, dannypack, json, notepack, proto};
 
 fn bench_deserialize_single(c: &mut Criterion) {
     let events = common::load_sample(1000);
@@ -26,6 +26,7 @@ fn bench_deserialize_single(c: &mut Criterion) {
     let capnp_data = capnp::serialize_event(event);
     let capnp_packed_data = capnp::serialize_event_packed(event);
     let dannypack_data = dannypack::serialize(event);
+    let notepack_data = notepack::serialize(event);
 
     let mut group = c.benchmark_group("deserialize_single");
     group.throughput(Throughput::Elements(1));
@@ -66,6 +67,10 @@ fn bench_deserialize_single(c: &mut Criterion) {
         b.iter(|| dannypack::deserialize(black_box(&dannypack_data)))
     });
 
+    group.bench_function("notepack", |b| {
+        b.iter(|| notepack::deserialize(black_box(&notepack_data)))
+    });
+
     group.finish();
 }
 
@@ -95,6 +100,7 @@ fn bench_deserialize_batch(c: &mut Criterion) {
         let capnp_data = capnp::serialize_batch(&batch);
         let capnp_packed_data = capnp::serialize_batch_packed(&batch);
         let dannypack_data = dannypack::serialize_batch(&batch);
+        let notepack_data = notepack::serialize_batch(&batch);
 
         group.throughput(Throughput::Elements(batch_size as u64));
 
@@ -151,6 +157,12 @@ fn bench_deserialize_batch(c: &mut Criterion) {
             &dannypack_data,
             |b, data| b.iter(|| dannypack::deserialize_batch(black_box(data))),
         );
+
+        group.bench_with_input(
+            BenchmarkId::new("notepack", batch_size),
+            &notepack_data,
+            |b, data| b.iter(|| notepack::deserialize_batch(black_box(data))),
+        );
     }
 
     group.finish();
@@ -178,6 +190,7 @@ fn bench_deserialize_throughput(c: &mut Criterion) {
     let capnp_data: Vec<_> = events.iter().map(capnp::serialize_event).collect();
     let capnp_packed_data: Vec<_> = events.iter().map(capnp::serialize_event_packed).collect();
     let dannypack_data: Vec<_> = events.iter().map(dannypack::serialize).collect();
+    let notepack_data: Vec<_> = events.iter().map(notepack::serialize).collect();
 
     let event_count = events.len() as u64;
 
@@ -257,6 +270,14 @@ fn bench_deserialize_throughput(c: &mut Criterion) {
         })
     });
 
+    group.bench_function("notepack", |b| {
+        b.iter(|| {
+            for data in &notepack_data {
+                black_box(notepack::deserialize(data).unwrap());
+            }
+        })
+    });
+
     group.finish();
 }
 
@@ -282,6 +303,7 @@ fn bench_deserialize_bytes_throughput(c: &mut Criterion) {
     let capnp_data: Vec<_> = events.iter().map(capnp::serialize_event).collect();
     let capnp_packed_data: Vec<_> = events.iter().map(capnp::serialize_event_packed).collect();
     let dannypack_data: Vec<_> = events.iter().map(dannypack::serialize).collect();
+    let notepack_data: Vec<_> = events.iter().map(notepack::serialize).collect();
 
     // Helper to run benchmark with format-specific byte throughput
     macro_rules! bench_with_bytes {
@@ -309,6 +331,7 @@ fn bench_deserialize_bytes_throughput(c: &mut Criterion) {
     bench_with_bytes!(c, "capnp", capnp_data, capnp::deserialize_event);
     bench_with_bytes!(c, "capnp_packed", capnp_packed_data, capnp::deserialize_event_packed);
     bench_with_bytes!(c, "dannypack", dannypack_data, dannypack::deserialize);
+    bench_with_bytes!(c, "notepack", notepack_data, notepack::deserialize);
 }
 
 criterion_group! {
